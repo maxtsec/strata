@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Strata.Api/Strata.Api.csproj" />
+    <Project Path="src/Strata.Application/Strata.Application.csproj" />
+    <Project Path="src/Strata.Domain/Strata.Domain.csproj" />
+    <Project Path="src/Strata.Infrastructure/Strata.Infrastructure.csproj" />
+  </Folder>
+</Solution>
