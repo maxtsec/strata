@@ -36,6 +36,8 @@ builder.Services
                 System.Text.Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SigningKey"]!))
         };
     });
+builder.Services.AddScoped<JwtTokenGenerator>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
