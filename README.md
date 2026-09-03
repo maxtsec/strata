@@ -92,12 +92,19 @@ have a finished repo.
 Prerequisites, once per machine:
 
 - .NET SDK matching `global.json` (currently pinned to the 10.0.4xx feature band)
-- A local SQL Server (Express or LocalDB both work) — used only for local dev, kept separate from the Azure SQL instance on purpose
+- Docker (Desktop on Windows/Mac), running a local SQL Server 2022 container — same setup on every machine, and the same engine family as Azure SQL, so migrations behave identically locally and deployed:
+  ```bash
+  docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=<pick a password>" \
+    -p 1433:1433 --name strata-sql --hostname strata-sql \
+    -v strata-sql-data:/var/opt/mssql \
+    -d mcr.microsoft.com/mssql/server:2022-latest
+  ```
+  This is local-only — kept separate from the Azure SQL instance on purpose. The volume persists data across container restarts; `docker start strata-sql` brings it back after a reboot.
 - `az login`, so `DefaultAzureCredential` can reach Blob Storage locally the same way the deployed app does via its managed identity
 - `dotnet tool restore` — installs `dotnet-ef` at the version pinned in `.config/dotnet-tools.json`
-- Two local secrets, set once:
+- Two local secrets, set once (use the same SA password as the `docker run` command above):
   ```bash
-  dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=.\SQLEXPRESS;Database=Strata;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true" --project src/Strata.Api
+  dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=Strata;User Id=sa;Password=<same password>;TrustServerCertificate=True;MultipleActiveResultSets=true" --project src/Strata.Api
   dotnet user-secrets set "Jwt:SigningKey" "<any random 32+ byte value, base64 is fine>" --project src/Strata.Api
   ```
 - `dotnet ef database update --project src/Strata.Infrastructure --startup-project src/Strata.Api` — creates the local database and applies migrations
