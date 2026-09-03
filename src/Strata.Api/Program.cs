@@ -37,6 +37,7 @@ builder.Services
         };
     });
 builder.Services.AddScoped<JwtTokenGenerator>();
+builder.Services.AddSingleton<IFileStorage, BlobFileStorage>();
 
 var app = builder.Build();
 
