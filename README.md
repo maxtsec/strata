@@ -9,18 +9,27 @@ separately owned lots, shared structure underneath. That's multi-tenancy in
 physical form — many customer organisations on one deployment, each fully
 isolated from the others.
 
-## Status: Phase 0 complete — starting Phase 1
+## Status: Phase 1 in progress
 
 This project is being built in phases, each ending in a working, deployed
-increment rather than a pile of untested code. Phase 0 proved the whole chain
-— code, tests, deployment, secrets — works end to end before any business
-logic exists.
+increment rather than a pile of untested code.
 
+**Phase 0 — Walking skeleton** *(complete)*
 - [x] Solution structure: four projects, dependencies enforced in one direction (and covered by architecture tests)
 - [x] `/health` endpoint
 - [x] Deployed to Azure App Service
 - [x] CI/CD via GitHub Actions (OIDC — no long-lived Azure credential stored in GitHub)
 - [x] Azure SQL provisioned, connection string in Key Vault (App Service reads it via its managed identity)
+
+**Phase 1 — Single-tenant core** *(current)*
+- [x] `Document` / `Folder` / `DocumentShare` domain entities
+- [x] ASP.NET Core Identity wired (Guid-keyed `ApplicationUser`, so it lines up with the entities' owner/user references with no string↔Guid conversion)
+- [x] EF Core migrations (applied to local dev DB; not yet applied to Azure SQL)
+- [x] Auth: `POST /api/auth/register` and `/login`, issuing JWTs
+- [x] File upload/download via Blob Storage — user-delegation SAS URIs, no static storage key anywhere
+- [ ] Folders CRUD
+- [ ] Roles / share links (the `DocumentShare` entity exists; no endpoints use it yet)
+- [ ] Apply the migration to Azure SQL
 
 ## Architecture
 
@@ -42,7 +51,7 @@ Strata.Domain  ◄──────────┘
 |---|---|
 | `Strata.Domain` | Entities, value objects, and business rules. No dependencies on EF Core, Azure SDKs, or ASP.NET — it should be unit-testable with nothing running. |
 | `Strata.Application` | Use cases. Depends on EF Core only for the `DbSet<T>` type, via a thin `IApplicationDbContext` interface it declares itself (see [ADR 0001](docs/adr/0001-no-repository-abstraction.md)) — no repository layer, no provider-specific code. |
-| `Strata.Infrastructure` | Implements `IApplicationDbContext` (`AppDbContext`, EF Core, migrations), plus Azure Blob Storage and email. |
+| `Strata.Infrastructure` | Implements `IApplicationDbContext` (`AppDbContext`, EF Core, migrations) and `IFileStorage` (Azure Blob Storage via SAS). Also hosts ASP.NET Core Identity's `ApplicationUser`. |
 | `Strata.Api` | Controllers, request validation, and dependency injection wiring (the only place `Infrastructure` is referenced directly). |
 
 The dependency direction itself is enforced by `tests/Strata.Architecture.Tests`,
@@ -79,6 +88,21 @@ the goal is to be able to defend every decision in an interview, not just to
 have a finished repo.
 
 ## Running locally
+
+Prerequisites, once per machine:
+
+- .NET SDK matching `global.json` (currently pinned to the 10.0.4xx feature band)
+- A local SQL Server (Express or LocalDB both work) — used only for local dev, kept separate from the Azure SQL instance on purpose
+- `az login`, so `DefaultAzureCredential` can reach Blob Storage locally the same way the deployed app does via its managed identity
+- `dotnet tool restore` — installs `dotnet-ef` at the version pinned in `.config/dotnet-tools.json`
+- Two local secrets, set once:
+  ```bash
+  dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=.\SQLEXPRESS;Database=Strata;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true" --project src/Strata.Api
+  dotnet user-secrets set "Jwt:SigningKey" "<any random 32+ byte value, base64 is fine>" --project src/Strata.Api
+  ```
+- `dotnet ef database update --project src/Strata.Infrastructure --startup-project src/Strata.Api` — creates the local database and applies migrations
+
+Then, each session:
 
 ```bash
 dotnet build
