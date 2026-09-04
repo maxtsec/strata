@@ -44,6 +44,7 @@ builder.Services.AddSingleton<IFileStorage, BlobFileStorage>();
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton<IAuthorizationHandler, OwnerAuthorizationHandler>();
 builder.Services.AddScoped<IAuthorizationHandler, DocumentAccessAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, DocumentEditAuthorizationHandler>();
 
 var app = builder.Build();
 
