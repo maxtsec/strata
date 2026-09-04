@@ -100,7 +100,7 @@ public class FoldersControllerTests : IntegrationTestBase
         var aFolderId = await TestApiHelpers.CreateFolderAsync(clientA, "A's folder");
         var bFolderId = await TestApiHelpers.CreateFolderAsync(clientB, "B's folder");
 
-        var response = await clientB.PutAsJsonAsync($"/api/folders/{bFolderId}", new { Name = "B's folder", ParentFolderId = aFolderId });
+        var response = await clientB.PutAsJsonAsync($"/api/folders/{bFolderId}", new { Name = "Should not persist", ParentFolderId = aFolderId });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
@@ -116,12 +116,13 @@ public class FoldersControllerTests : IntegrationTestBase
         var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "folders-selfparent@test.local");
         var folderId = await TestApiHelpers.CreateFolderAsync(client, "Folder");
 
-        var response = await client.PutAsJsonAsync($"/api/folders/{folderId}", new { Name = "Folder", ParentFolderId = folderId });
+        var response = await client.PutAsJsonAsync($"/api/folders/{folderId}", new { Name = "Should not persist", ParentFolderId = folderId });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         var folder = await Fixture.QueryDbAsync(db =>
             db.Folders.AsNoTracking().SingleAsync(f => f.Id == folderId));
+        Assert.Equal("Folder", folder.Name);
         Assert.Null(folder.ParentFolderId);
     }
 
@@ -134,12 +135,13 @@ public class FoldersControllerTests : IntegrationTestBase
         var cId = await TestApiHelpers.CreateFolderAsync(client, "C", bId);
 
         // A -> B -> C already exists; try to also set A's parent to C, closing the loop.
-        var response = await client.PutAsJsonAsync($"/api/folders/{aId}", new { Name = "A", ParentFolderId = cId });
+        var response = await client.PutAsJsonAsync($"/api/folders/{aId}", new { Name = "Should not persist", ParentFolderId = cId });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         var folderA = await Fixture.QueryDbAsync(db =>
             db.Folders.AsNoTracking().SingleAsync(f => f.Id == aId));
+        Assert.Equal("A", folderA.Name);
         Assert.Null(folderA.ParentFolderId);
     }
 
