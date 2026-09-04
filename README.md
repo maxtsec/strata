@@ -91,27 +91,59 @@ have a finished repo.
 
 Prerequisites, once per machine:
 
-- .NET SDK matching `global.json` (currently pinned to the 10.0.4xx feature band)
-- Docker (Desktop on Windows/Mac), running a local SQL Server 2022 container — same setup on every machine, and the same engine family as Azure SQL, so migrations behave identically locally and deployed:
-  ```bash
-  docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=<pick a password>" \
-    -p 1433:1433 --name strata-sql --hostname strata-sql \
-    -v strata-sql-data:/var/opt/mssql \
-    -d mcr.microsoft.com/mssql/server:2022-latest
-  ```
-  This is local-only — kept separate from the Azure SQL instance on purpose. The volume persists data across container restarts; `docker start strata-sql` brings it back after a reboot. (On Windows PowerShell, either drop the `\` line continuations and run it as one line, or swap them for `` ` ``.)
-- `az login`, so `DefaultAzureCredential` can reach Blob Storage locally the same way the deployed app does via its managed identity
-- `dotnet tool restore` — installs `dotnet-ef` at the version pinned in `.config/dotnet-tools.json`
-- Two local secrets, set once (use the same SA password as the `docker run` command above):
-  ```bash
-  dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=Strata;User Id=sa;Password=<same password>;TrustServerCertificate=True;MultipleActiveResultSets=true" --project src/Strata.Api
-  dotnet user-secrets set "Jwt:SigningKey" "<any random 32+ byte value, base64 is fine>" --project src/Strata.Api
-  ```
-- `dotnet ef database update --project src/Strata.Infrastructure --startup-project src/Strata.Api` — creates the local database and applies migrations
+- [Git](https://git-scm.com/downloads/win)
+- [.NET SDK](https://learn.microsoft.com/dotnet/core/install/windows) matching
+  `global.json` (currently .NET 10, 10.0.4xx feature band)
+- [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+  using its WSL 2 backend and Linux containers
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli-windows)
+
+### First-time setup on Windows
+
+Open PowerShell, clone the repository, and start the local SQL Server:
+
+```powershell
+git clone https://github.com/maxtsec/strata.git
+Set-Location strata
+
+docker run --name strata-sql --hostname strata-sql `
+  -e "ACCEPT_EULA=Y" `
+  -e "MSSQL_SA_PASSWORD=Strata_Dev_2026!" `
+  -p 127.0.0.1:1433:1433 `
+  -v strata-sql-data:/var/opt/mssql `
+  -d mcr.microsoft.com/mssql/server:2022-latest
+```
+
+`Strata_Dev_2026!` is a known local/test-only credential. The port is bound to
+loopback only; never reuse this password for Azure or another real environment.
+The Docker volume preserves the database between restarts.
+
+Restore tools and packages, then create the local configuration:
+
+```powershell
+dotnet tool restore
+dotnet restore
+
+$jwtBytes = New-Object byte[] 48
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($jwtBytes)
+$jwtKey = [Convert]::ToBase64String($jwtBytes)
+$rng.Dispose()
+
+dotnet user-secrets set 'ConnectionStrings:DefaultConnection' 'Server=localhost,1433;Database=Strata;User Id=sa;Password=Strata_Dev_2026!;TrustServerCertificate=True;MultipleActiveResultSets=true' --project src/Strata.Api
+dotnet user-secrets set 'Jwt:SigningKey' $jwtKey --project src/Strata.Api
+az login
+dotnet ef database update --project src/Strata.Infrastructure --startup-project src/Strata.Api
+```
+
+`az login` lets `DefaultAzureCredential` access Blob Storage locally; deployed
+code uses managed identity instead. On macOS/Linux, use the same commands in a
+Bash-compatible shell and replace PowerShell's backtick continuations with `\`.
 
 Then, each session:
 
-```bash
+```powershell
+docker start strata-sql
 dotnet build
 dotnet test
 dotnet run --project src/Strata.Api
@@ -125,6 +157,6 @@ requests through `WebApplicationFactory` against a second, dedicated
 database (`StrataIntegrationTests`) on the same SQL Server container, reset
 between tests with [Respawn](https://github.com/jbogard/Respawn). No extra
 setup needed beyond the container already being up; the connection string
-defaults to the same `sa` credentials as local dev and can be overridden with
-the `STRATA_TEST_CONNECTION_STRING` environment variable (CI sets this to
-point at its own service container).
+defaults to the local/test credential above. Override it with the
+`STRATA_TEST_CONNECTION_STRING` environment variable if your container uses a
+different password; CI points it at its own SQL Server service container.
