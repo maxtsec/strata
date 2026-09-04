@@ -139,8 +139,9 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
-        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
-        Assert.Equal(1, shareCount);
+        var shares = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().Where(s => s.DocumentId == documentId).ToListAsync());
+        var share = Assert.Single(shares);
+        Assert.Equal(DocumentShare.Role.Viewer, share.UserRole);
     }
 
     [Fact]
@@ -244,5 +245,6 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         var downloadResponse = await clientB.GetAsync($"/api/documents/{documentId}/download");
         Assert.Equal(HttpStatusCode.NotFound, downloadResponse.StatusCode);
+        Assert.Equal(0, Fixture.FileStorage.DownloadUriCallCount);
     }
 }
