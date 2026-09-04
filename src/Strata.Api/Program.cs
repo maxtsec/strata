@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Strata.Api.Authorization;
 using Strata.Infrastructure.Persistence;
 using Strata.Infrastructure.Identity;
 using Strata.Application.Persistence;
@@ -39,6 +41,8 @@ builder.Services
     });
 builder.Services.AddScoped<JwtTokenGenerator>();
 builder.Services.AddSingleton<IFileStorage, BlobFileStorage>();
+builder.Services.AddAuthorization();
+builder.Services.AddSingleton<IAuthorizationHandler, OwnerAuthorizationHandler>();
 
 var app = builder.Build();
 
