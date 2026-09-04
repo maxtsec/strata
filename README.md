@@ -99,7 +99,7 @@ Prerequisites, once per machine:
     -v strata-sql-data:/var/opt/mssql \
     -d mcr.microsoft.com/mssql/server:2022-latest
   ```
-  This is local-only — kept separate from the Azure SQL instance on purpose. The volume persists data across container restarts; `docker start strata-sql` brings it back after a reboot.
+  This is local-only — kept separate from the Azure SQL instance on purpose. The volume persists data across container restarts; `docker start strata-sql` brings it back after a reboot. (On Windows PowerShell, either drop the `\` line continuations and run it as one line, or swap them for `` ` ``.)
 - `az login`, so `DefaultAzureCredential` can reach Blob Storage locally the same way the deployed app does via its managed identity
 - `dotnet tool restore` — installs `dotnet-ef` at the version pinned in `.config/dotnet-tools.json`
 - Two local secrets, set once (use the same SA password as the `docker run` command above):
@@ -119,3 +119,12 @@ dotnet run --project src/Strata.Api
 
 `/health` is then available at the URL `dotnet run` prints (e.g.
 `http://localhost:5115/health`).
+
+`dotnet test` also runs `tests/Strata.Api.IntegrationTests` — real HTTP
+requests through `WebApplicationFactory` against a second, dedicated
+database (`StrataIntegrationTests`) on the same SQL Server container, reset
+between tests with [Respawn](https://github.com/jbogard/Respawn). No extra
+setup needed beyond the container already being up; the connection string
+defaults to the same `sa` credentials as local dev and can be overridden with
+the `STRATA_TEST_CONNECTION_STRING` environment variable (CI sets this to
+point at its own service container).
