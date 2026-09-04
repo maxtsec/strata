@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Strata.Domain.Documents;
 
 namespace Strata.Api.IntegrationTests;
 
@@ -53,5 +54,14 @@ public static class TestApiHelpers
 
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         return json.GetProperty("documentId").GetGuid();
+    }
+
+    public static async Task<Guid> CreateShareAsync(HttpClient client, Guid documentId, string email, DocumentShare.Role role)
+    {
+        var response = await client.PostAsJsonAsync($"/api/documents/{documentId}/shares", new { Email = email, Role = role });
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return json.GetProperty("shareId").GetGuid();
     }
 }
