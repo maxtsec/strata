@@ -25,17 +25,27 @@ public class DocumentsController : ControllerBase
         _authorizationService = authorizationService;
     }
 
-    private Guid CurrentUserId =>
-        Guid.Parse(User.FindFirst(JwtRegisteredClaimNames.Sub)!.Value);
+    private Guid? CurrentUserId =>
+        Guid.TryParse(User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var userId) ? userId : null;
 
     [HttpPost]
     public async Task<IActionResult> Create(CreateDocumentRequest request, CancellationToken cancellationToken)
     {
+        if (CurrentUserId is not { } userId)
+        {
+            return Unauthorized();
+        }
+
+        if (request.FolderId is { } folderId && !await IsFolderOwnedByCurrentUser(folderId, cancellationToken))
+        {
+            return BadRequest("Folder not found.");
+        }
+
         var document = new Document
         {
             Id = Guid.NewGuid(),
             Name = request.Name,
-            OwnerId = CurrentUserId,
+            OwnerId = userId,
             FolderId = request.FolderId,
             ContentType = request.ContentType,
             Size = request.Size
@@ -63,11 +73,25 @@ public class DocumentsController : ControllerBase
         var authResult = await _authorizationService.AuthorizeAsync(User, document, new OwnerRequirement());
         if (!authResult.Succeeded)
         {
-            return Forbid();
+            // Missing vs. not-owned both resolve to 404, so a response can't be used
+            // to tell whether an id exists at all (anti-enumeration).
+            return NotFound();
         }
 
         var downloadUri = await _fileStorage.GetDownloadUriAsync(id, cancellationToken);
         return Ok(new { DownloadUrl = downloadUri });
+    }
+
+    private async Task<bool> IsFolderOwnedByCurrentUser(Guid folderId, CancellationToken cancellationToken)
+    {
+        var folder = await _dbContext.Folders.FindAsync(new object[] { folderId }, cancellationToken);
+        if (folder is null)
+        {
+            return false;
+        }
+
+        var authResult = await _authorizationService.AuthorizeAsync(User, folder, new OwnerRequirement());
+        return authResult.Succeeded;
     }
 }
 
