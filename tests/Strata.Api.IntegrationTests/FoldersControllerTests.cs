@@ -80,16 +80,16 @@ public class FoldersControllerTests : IntegrationTestBase
     {
         var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "folders-createparent-a@test.local");
         var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "folders-createparent-b@test.local");
-        var bUserId = TestApiHelpers.UserIdFromToken(clientB.DefaultRequestHeaders.Authorization!.Parameter!);
         var aFolderId = await TestApiHelpers.CreateFolderAsync(clientA, "A's folder");
+
+        var folderCountBefore = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().CountAsync());
 
         var response = await clientB.PostAsJsonAsync("/api/folders", new { Name = "B's folder", ParentFolderId = aFolderId });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var bFolderCount = await Fixture.QueryDbAsync(db =>
-            db.Folders.AsNoTracking().CountAsync(f => f.OwnerId == bUserId));
-        Assert.Equal(0, bFolderCount);
+        var folderCountAfter = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().CountAsync());
+        Assert.Equal(folderCountBefore, folderCountAfter);
     }
 
     [Fact]
