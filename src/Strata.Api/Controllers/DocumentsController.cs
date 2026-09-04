@@ -90,6 +90,28 @@ public class DocumentsController : ControllerBase
         return Ok(new { DownloadUrl = downloadUri });
     }
 
+    [HttpPut("{id}")]
+    public async Task<IActionResult> Rename(Guid id, UpdateDocumentRequest request, CancellationToken cancellationToken)
+    {
+        var document = await _dbContext.Documents.FindAsync(new object[] { id }, cancellationToken);
+        if (document is null)
+        {
+            return NotFound();
+        }
+
+        var authResult = await _authorizationService.AuthorizeAsync(User, document, new DocumentEditRequirement());
+        if (!authResult.Succeeded)
+        {
+            // Missing vs. not-owned/view-only both resolve to 404 (anti-enumeration).
+            return NotFound();
+        }
+
+        document.Name = request.Name;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
     [HttpPost("{id}/shares")]
     public async Task<IActionResult> CreateShare(Guid id, CreateShareRequest request, CancellationToken cancellationToken)
     {
@@ -227,4 +249,5 @@ public class DocumentsController : ControllerBase
 }
 
 public record CreateDocumentRequest(string Name, Guid? FolderId, string ContentType, long Size);
+public record UpdateDocumentRequest(string Name);
 public record CreateShareRequest(string Email, DocumentShare.Role Role);

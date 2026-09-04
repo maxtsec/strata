@@ -263,4 +263,141 @@ public class DocumentsControllerTests : IntegrationTestBase
         Assert.Equal(HttpStatusCode.NotFound, downloadResponse.StatusCode);
         Assert.Equal(0, Fixture.FileStorage.DownloadUriCallCount);
     }
+
+    [Fact]
+    public async Task Rename_by_owner_succeeds()
+    {
+        var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-owner@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(client, "original.txt");
+
+        var response = await client.PutAsJsonAsync($"/api/documents/{documentId}", new { Name = "renamed.txt" });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        Assert.Equal("renamed.txt", document.Name);
+    }
+
+    [Fact]
+    public async Task Rename_by_member_succeeds()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-member-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-member-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "original.txt");
+        await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-rename-member-b@test.local", DocumentShare.Role.Member);
+
+        var response = await clientB.PutAsJsonAsync($"/api/documents/{documentId}", new { Name = "renamed-by-member.txt" });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        Assert.Equal("renamed-by-member.txt", document.Name);
+    }
+
+    [Fact]
+    public async Task Rename_by_viewer_returns_404_and_name_unchanged()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-viewer-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-viewer-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "original.txt");
+        await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-rename-viewer-b@test.local", DocumentShare.Role.Viewer);
+
+        var response = await clientB.PutAsJsonAsync($"/api/documents/{documentId}", new { Name = "Should not persist" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        Assert.Equal("original.txt", document.Name);
+    }
+
+    [Fact]
+    public async Task Rename_by_unshared_foreign_user_returns_404_and_name_unchanged()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-foreign-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-foreign-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "original.txt");
+
+        var response = await clientB.PutAsJsonAsync($"/api/documents/{documentId}", new { Name = "Should not persist" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        Assert.Equal("original.txt", document.Name);
+    }
+
+    [Fact]
+    public async Task Missing_and_foreign_document_rename_produce_the_same_response()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-equiv-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-equiv-b@test.local");
+        var foreignDocumentId = await TestApiHelpers.CreateDocumentAsync(clientA, "original.txt");
+
+        var foreignResponse = await clientB.PutAsJsonAsync($"/api/documents/{foreignDocumentId}", new { Name = "x" });
+        var missingResponse = await clientB.PutAsJsonAsync($"/api/documents/{Guid.NewGuid()}", new { Name = "x" });
+
+        Assert.Equal(foreignResponse.StatusCode, missingResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, foreignResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Viewer_can_still_download_despite_no_rename_access()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-viewer-download-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-viewer-download-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "original.txt");
+        await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-viewer-download-b@test.local", DocumentShare.Role.Viewer);
+
+        var renameResponse = await clientB.PutAsJsonAsync($"/api/documents/{documentId}", new { Name = "Should not persist" });
+        Assert.Equal(HttpStatusCode.NotFound, renameResponse.StatusCode);
+
+        var downloadResponse = await clientB.GetAsync($"/api/documents/{documentId}/download");
+        Assert.Equal(HttpStatusCode.OK, downloadResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Member_cannot_create_shares()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-createshare-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-createshare-b@test.local");
+        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-createshare-c@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
+        await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-member-createshare-b@test.local", DocumentShare.Role.Member);
+
+        var response = await clientB.PostAsJsonAsync($"/api/documents/{documentId}/shares",
+            new { Email = "docs-member-createshare-c@test.local", Role = DocumentShare.Role.Viewer });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
+        Assert.Equal(1, shareCount);
+    }
+
+    [Fact]
+    public async Task Member_cannot_list_shares()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-listshare-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-listshare-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
+        await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-member-listshare-b@test.local", DocumentShare.Role.Member);
+
+        var response = await clientB.GetAsync($"/api/documents/{documentId}/shares");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Member_cannot_delete_shares()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-deleteshare-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-deleteshare-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
+        var shareId = await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-member-deleteshare-b@test.local", DocumentShare.Role.Member);
+
+        var response = await clientB.DeleteAsync($"/api/documents/{documentId}/shares/{shareId}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var stillExists = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().AnyAsync(s => s.Id == shareId));
+        Assert.True(stillExists);
+    }
 }
