@@ -43,6 +43,7 @@ builder.Services.AddScoped<JwtTokenGenerator>();
 builder.Services.AddSingleton<IFileStorage, BlobFileStorage>();
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton<IAuthorizationHandler, OwnerAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, DocumentAccessAuthorizationHandler>();
 
 var app = builder.Build();
 

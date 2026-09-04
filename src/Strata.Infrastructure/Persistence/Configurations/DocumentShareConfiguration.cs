@@ -18,5 +18,7 @@ public class DocumentShareConfiguration : IEntityTypeConfiguration<DocumentShare
             .WithMany()
             .HasForeignKey(share => share.UserId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(share => new { share.DocumentId, share.UserId }).IsUnique();
     }
 }
