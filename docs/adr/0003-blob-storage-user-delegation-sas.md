@@ -22,10 +22,14 @@ configuration.
 ASP.NET Core endpoint, which streams to/from Blob Storage server-side) was
 rejected: every byte would cross the App Service twice, doubling bandwidth
 and compute cost for what is fundamentally a storage operation, and turning
-the API into a throughput bottleneck for it. It buys no security the SAS
-approach doesn't already have — the "is this user allowed to touch this
-document" check happens before either a stream or a SAS URI is handed out,
-so proxying adds cost without adding a guarantee.
+the API into a throughput bottleneck for it. This does give up something
+real, not nothing — a proxy re-runs authorization on every request, so a
+revoked `DocumentShare` stops access immediately, while a SAS URI already
+issued keeps working until it naturally expires (see Cost). The proxy
+approach was rejected anyway: the residual-access window a SAS leaves open
+is small and bounded (currently 15 minutes), and accepting it is cheaper
+than doubling every request's bandwidth/compute cost to close a gap that
+narrow.
 
 **Storage-account-key-based SAS** was rejected in favour of a
 user-delegation SAS. An account key is a long-lived, all-powerful static
@@ -42,6 +46,27 @@ own database id gives no meaningful obscurity if the container were ever
 misconfigured to be public.
 
 ## Cost
+
+A SAS URI, once issued, is a bearer credential valid for its full window
+regardless of what happens afterward — deleting a `DocumentShare` (or the
+document itself) stops the *next* SAS from being minted, but does not
+revoke one already handed out. Strata accepts up to ~15 minutes of residual
+access after a revoke as the cost of not proxying every request. Azure does
+offer a way to invalidate SAS tokens early — revoking the user-delegation
+key (or the RBAC role behind it) — but that revocation isn't instant
+(propagation delay) and isn't scoped to one SAS: it invalidates *every*
+token signed by that key, including ones for other users' unrelated,
+still-valid access. That blast radius is why Strata doesn't reach for it on
+a single share revocation; it would be the right tool for something like
+"lock this account out immediately," not "one recipient lost access to one
+document."
+
+The SAS URI is itself a bearer credential — anyone who obtains it has the
+access it grants, no further authentication required — so it needs the same
+handling discipline as a password: not logged, not left in browser history
+longer than necessary, not pasted somewhere insecure. Nothing in the app
+today enforces that discipline on the client side; it's a property of the
+design to be aware of, not a control Strata currently implements.
 
 SAS URIs are time-limited (15 minutes): an upload or download that takes
 longer than that window fails and needs a freshly minted URI. Fine for
