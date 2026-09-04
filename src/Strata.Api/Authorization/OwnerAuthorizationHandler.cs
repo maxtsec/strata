@@ -13,7 +13,7 @@ public class OwnerAuthorizationHandler : AuthorizationHandler<OwnerRequirement, 
     {
         var userIdClaim = context.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
 
-        if (userIdClaim is not null && Guid.Parse(userIdClaim) == resource.OwnerId)
+        if (Guid.TryParse(userIdClaim, out var userId) && userId == resource.OwnerId)
         {
             context.Succeed(requirement);
         }
