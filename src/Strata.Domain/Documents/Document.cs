@@ -1,6 +1,6 @@
 namespace Strata.Domain.Documents;
 
-public class Document
+public class Document : IOwnable
 {
     public Guid Id { get; init; }
     public Guid OwnerId { get; init; }

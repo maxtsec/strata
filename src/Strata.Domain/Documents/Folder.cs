@@ -1,6 +1,6 @@
 namespace Strata.Domain.Documents;
 
-public class Folder
+public class Folder : IOwnable
 {
     public Guid Id { get; init; }
     public Guid OwnerId { get; init; }

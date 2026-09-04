@@ -3,6 +3,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Strata.Api.Authorization;
 using Strata.Application.Persistence;
 using Strata.Domain.Documents;
 
@@ -15,11 +16,13 @@ public class DocumentsController : ControllerBase
 {
     private readonly IApplicationDbContext _dbContext;
     private readonly IFileStorage _fileStorage;
+    private readonly IAuthorizationService _authorizationService;
 
-    public DocumentsController(IApplicationDbContext dbContext, IFileStorage fileStorage)
+    public DocumentsController(IApplicationDbContext dbContext, IFileStorage fileStorage, IAuthorizationService authorizationService)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
+        _authorizationService = authorizationService;
     }
 
     private Guid CurrentUserId =>
@@ -55,8 +58,10 @@ public class DocumentsController : ControllerBase
         {
             return NotFound();
         }
-        // 3. ToDo: DocumentShare
-        if (document.OwnerId != CurrentUserId)
+
+        // TODO: DocumentShare — a Member/Viewer should also pass here, not just the owner
+        var authResult = await _authorizationService.AuthorizeAsync(User, document, new OwnerRequirement());
+        if (!authResult.Succeeded)
         {
             return Forbid();
         }
