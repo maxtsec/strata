@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 
 namespace Strata.Api.IntegrationTests;
 
@@ -35,6 +36,11 @@ public class FoldersControllerTests : IntegrationTestBase
         var response = await clientB.PutAsJsonAsync($"/api/folders/{folderId}", new { Name = "Hijacked", ParentFolderId = (Guid?)null });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var folder = await Fixture.QueryDbAsync(db =>
+            db.Folders.AsNoTracking().SingleAsync(f => f.Id == folderId));
+        Assert.Equal("A's folder", folder.Name);
+        Assert.Null(folder.ParentFolderId);
     }
 
     [Fact]
@@ -47,6 +53,10 @@ public class FoldersControllerTests : IntegrationTestBase
         var response = await clientB.DeleteAsync($"/api/folders/{folderId}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var stillExists = await Fixture.QueryDbAsync(db =>
+            db.Folders.AsNoTracking().AnyAsync(f => f.Id == folderId));
+        Assert.True(stillExists);
     }
 
     [Fact]
@@ -70,11 +80,16 @@ public class FoldersControllerTests : IntegrationTestBase
     {
         var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "folders-createparent-a@test.local");
         var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "folders-createparent-b@test.local");
+        var bUserId = TestApiHelpers.UserIdFromToken(clientB.DefaultRequestHeaders.Authorization!.Parameter!);
         var aFolderId = await TestApiHelpers.CreateFolderAsync(clientA, "A's folder");
 
         var response = await clientB.PostAsJsonAsync("/api/folders", new { Name = "B's folder", ParentFolderId = aFolderId });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var bFolderCount = await Fixture.QueryDbAsync(db =>
+            db.Folders.AsNoTracking().CountAsync(f => f.OwnerId == bUserId));
+        Assert.Equal(0, bFolderCount);
     }
 
     [Fact]
@@ -88,6 +103,11 @@ public class FoldersControllerTests : IntegrationTestBase
         var response = await clientB.PutAsJsonAsync($"/api/folders/{bFolderId}", new { Name = "B's folder", ParentFolderId = aFolderId });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var bFolder = await Fixture.QueryDbAsync(db =>
+            db.Folders.AsNoTracking().SingleAsync(f => f.Id == bFolderId));
+        Assert.Equal("B's folder", bFolder.Name);
+        Assert.Null(bFolder.ParentFolderId);
     }
 
     [Fact]
@@ -99,6 +119,10 @@ public class FoldersControllerTests : IntegrationTestBase
         var response = await client.PutAsJsonAsync($"/api/folders/{folderId}", new { Name = "Folder", ParentFolderId = folderId });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var folder = await Fixture.QueryDbAsync(db =>
+            db.Folders.AsNoTracking().SingleAsync(f => f.Id == folderId));
+        Assert.Null(folder.ParentFolderId);
     }
 
     [Fact]
@@ -113,6 +137,10 @@ public class FoldersControllerTests : IntegrationTestBase
         var response = await client.PutAsJsonAsync($"/api/folders/{aId}", new { Name = "A", ParentFolderId = cId });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var folderA = await Fixture.QueryDbAsync(db =>
+            db.Folders.AsNoTracking().SingleAsync(f => f.Id == aId));
+        Assert.Null(folderA.ParentFolderId);
     }
 
     [Fact]
@@ -120,11 +148,16 @@ public class FoldersControllerTests : IntegrationTestBase
     {
         var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "folders-nonempty-child@test.local");
         var parentId = await TestApiHelpers.CreateFolderAsync(client, "Parent");
-        await TestApiHelpers.CreateFolderAsync(client, "Child", parentId);
+        var childId = await TestApiHelpers.CreateFolderAsync(client, "Child", parentId);
 
         var response = await client.DeleteAsync($"/api/folders/{parentId}");
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        var parentExists = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().AnyAsync(f => f.Id == parentId));
+        var childExists = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().AnyAsync(f => f.Id == childId));
+        Assert.True(parentExists);
+        Assert.True(childExists);
     }
 
     [Fact]
@@ -132,11 +165,16 @@ public class FoldersControllerTests : IntegrationTestBase
     {
         var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "folders-nonempty-doc@test.local");
         var folderId = await TestApiHelpers.CreateFolderAsync(client, "Folder");
-        await TestApiHelpers.CreateDocumentAsync(client, "doc.txt", folderId);
+        var documentId = await TestApiHelpers.CreateDocumentAsync(client, "doc.txt", folderId);
 
         var response = await client.DeleteAsync($"/api/folders/{folderId}");
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        var folderExists = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().AnyAsync(f => f.Id == folderId));
+        var documentExists = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().AnyAsync(d => d.Id == documentId));
+        Assert.True(folderExists);
+        Assert.True(documentExists);
     }
 
     [Fact]
