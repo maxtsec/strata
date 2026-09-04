@@ -39,18 +39,22 @@ shared JWT signing key is simpler to distribute across instances than
 provisioning and rotating a Data Protection key ring, for a comparable
 security posture at this scale.
 
-**Microsoft Entra External ID** (the current name for what used to be
-marketed as Azure AD B2C, which Microsoft no longer offers to new
-customers) for end-user sign-in — noted in the project's own tech stack as
-a possible later upgrade — was rejected for now. Its tenant/app-registration
-model is real setup overhead that only pays for itself once there is an
-actual enterprise-SSO story to tell. Note this is a separate concept from
-Strata's own Phase 2 tenant model: an Entra *identity* tenant is about who
-can sign in and how, while a Strata *application* tenant is about whose
-data a signed-in user can see — introducing Entra wouldn't automatically
-give Strata multi-tenancy, and Strata's tenant isolation wouldn't
-automatically follow from an Entra tenant boundary either. They're worth
-revisiting together, not assumed to arrive as a pair.
+**Microsoft Entra ID / Microsoft Entra External ID** was rejected for now.
+External ID is Microsoft's next-generation CIAM platform and the
+recommended choice for new customer-identity projects; it is not a rename
+of Azure AD B2C. Azure AD B2C remains a separate product for existing
+customers but has not been available for purchase by new customers since
+1 May 2025 — noted here as "a possible later upgrade" in the project's own
+tech stack, which really means External ID if and when this gets picked
+up. Either way, its tenant/app-registration model is real setup overhead
+that only pays for itself once there is an actual enterprise-SSO story to
+tell. Note this is a separate concept from Strata's own Phase 2 tenant
+model: an Entra *identity* tenant is about who can sign in and how, while a
+Strata *application* tenant is about whose data a signed-in user can see —
+adopting Entra wouldn't automatically give Strata multi-tenancy, and
+Strata's tenant isolation wouldn't automatically follow from an Entra
+tenant boundary either. They're worth revisiting together, not assumed to
+arrive as a pair.
 
 **Refresh tokens / sliding sessions** were deferred, not rejected: a hard
 one-hour expiry is simple and sufficient to demonstrate the auth flow, but a
