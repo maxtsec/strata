@@ -105,6 +105,11 @@ public class DocumentsController : ControllerBase
             return NotFound();
         }
 
+        if (!Enum.IsDefined(request.Role))
+        {
+            return BadRequest("Invalid role.");
+        }
+
         var recipient = await _userManager.FindByEmailAsync(request.Email);
         if (recipient is null)
         {
@@ -139,10 +144,20 @@ public class DocumentsController : ControllerBase
         }
         catch (DbUpdateException)
         {
-            // Rare race: two requests shared the same document with the same
-            // user concurrently: the pre-check above passed for both, but the
-            // unique index only let one insert through.
-            return Conflict("Document is already shared with this user.");
+            // The pre-check above covers the common case; this catches the rare
+            // race where the same share was inserted concurrently, after the
+            // check but before this save. Re-verify rather than assume the
+            // unique index is why it failed — some other DbUpdateException (a
+            // transient connection issue, an unrelated constraint) would
+            // otherwise get misreported as "already shared".
+            var stillAlreadyShared = await _dbContext.DocumentShares
+                .AnyAsync(share => share.DocumentId == id && share.UserId == recipient.Id, cancellationToken);
+            if (stillAlreadyShared)
+            {
+                return Conflict("Document is already shared with this user.");
+            }
+
+            throw;
         }
 
         return Ok(new { ShareId = documentShare.Id });
