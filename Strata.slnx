@@ -7,5 +7,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Strata.Architecture.Tests/Strata.Architecture.Tests.csproj" />
+    <Project Path="tests/Strata.Api.IntegrationTests/Strata.Api.IntegrationTests.csproj" />
   </Folder>
 </Solution>

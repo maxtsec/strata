@@ -61,3 +61,7 @@ app.MapControllers();
 app.MapHealthChecks("/health");
 
 app.Run();
+
+// Exposes the top-level statements' implicit Program class so
+// WebApplicationFactory<Program> in the integration test project can host it.
+public partial class Program { }
