@@ -15,8 +15,9 @@ public class DocumentsControllerTests : IntegrationTestBase
     {
         var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-createfolder-a@test.local");
         var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-createfolder-b@test.local");
-        var bUserId = TestApiHelpers.UserIdFromToken(clientB.DefaultRequestHeaders.Authorization!.Parameter!);
         var aFolderId = await TestApiHelpers.CreateFolderAsync(clientA, "A's folder");
+
+        var documentCountBefore = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().CountAsync());
 
         var response = await clientB.PostAsJsonAsync("/api/documents", new
         {
@@ -28,9 +29,8 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var bDocumentCount = await Fixture.QueryDbAsync(db =>
-            db.Documents.AsNoTracking().CountAsync(d => d.OwnerId == bUserId));
-        Assert.Equal(0, bDocumentCount);
+        var documentCountAfter = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().CountAsync());
+        Assert.Equal(documentCountBefore, documentCountAfter);
         Assert.Equal(0, Fixture.FileStorage.UploadUriCallCount);
     }
 
