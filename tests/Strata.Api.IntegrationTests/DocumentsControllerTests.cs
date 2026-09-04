@@ -112,6 +112,22 @@ public class DocumentsControllerTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task Create_share_with_invalid_role_returns_400()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-create-badrole-a@test.local");
+        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-create-badrole-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
+
+        var response = await clientA.PostAsJsonAsync($"/api/documents/{documentId}/shares",
+            new { Email = "shares-create-badrole-b@test.local", Role = (DocumentShare.Role)999 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
+        Assert.Equal(0, shareCount);
+    }
+
+    [Fact]
     public async Task Create_share_with_self_returns_400()
     {
         var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-create-self@test.local");
