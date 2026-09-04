@@ -105,24 +105,26 @@ public class FoldersController : ControllerBase
             }
 
             // Walk from the proposed parent up toward the root looking for `id`.
-            // A visited set bounds the walk even if pre-existing data already has
-            // an unrelated cycle in it — we only care whether *this* folder would
-            // become its own ancestor, not whether the rest of the tree is clean.
+            // Fail closed: a repeated node (pre-existing corrupt data) or an
+            // ancestor missing from this user's own folder map (a foreign or
+            // dangling reference) both abort the move rather than silently
+            // allowing it — only a *genuine* null parent counts as a clean path
+            // to the root.
             var visited = new HashSet<Guid>();
             var current = (Guid?)parentId;
             while (current is { } currentId)
             {
-                if (currentId == id)
+                if (currentId == id || !visited.Add(currentId))
                 {
                     return BadRequest("This move would create a folder cycle.");
                 }
 
-                if (!visited.Add(currentId))
+                if (!parentOf.TryGetValue(currentId, out var next))
                 {
-                    break;
+                    return BadRequest("This move would create a folder cycle.");
                 }
 
-                current = parentOf.TryGetValue(currentId, out var next) ? next : null;
+                current = next;
             }
 
             // Note: two concurrent requests moving folders in opposite directions
@@ -173,10 +175,18 @@ public class FoldersController : ControllerBase
         {
             // The pre-check above covers the common case; this catches the rare
             // race where a child folder/document was inserted concurrently, after
-            // the check but before this save. The FK constraint (DeleteBehavior
-            // .Restrict) is what actually guarantees data integrity either way —
-            // this only turns that into a clean 409 instead of an unhandled 500.
-            return Conflict("Folder is not empty.");
+            // the check but before this save. Re-verify rather than assume the FK
+            // constraint is why it failed — some other DbUpdateException (a
+            // transient connection issue, an unrelated constraint) would otherwise
+            // get misreported as "not empty".
+            var stillHasChildFolders = await _dbContext.Folders.AnyAsync(f => f.ParentFolderId == id, cancellationToken);
+            var stillHasDocuments = await _dbContext.Documents.AnyAsync(d => d.FolderId == id, cancellationToken);
+            if (stillHasChildFolders || stillHasDocuments)
+            {
+                return Conflict("Folder is not empty.");
+            }
+
+            throw;
         }
 
         return NoContent();
