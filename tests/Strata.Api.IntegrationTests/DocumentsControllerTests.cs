@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
 
 namespace Strata.Api.IntegrationTests;
 
@@ -14,6 +15,7 @@ public class DocumentsControllerTests : IntegrationTestBase
     {
         var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-createfolder-a@test.local");
         var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-createfolder-b@test.local");
+        var bUserId = TestApiHelpers.UserIdFromToken(clientB.DefaultRequestHeaders.Authorization!.Parameter!);
         var aFolderId = await TestApiHelpers.CreateFolderAsync(clientA, "A's folder");
 
         var response = await clientB.PostAsJsonAsync("/api/documents", new
@@ -25,6 +27,11 @@ public class DocumentsControllerTests : IntegrationTestBase
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var bDocumentCount = await Fixture.QueryDbAsync(db =>
+            db.Documents.AsNoTracking().CountAsync(d => d.OwnerId == bUserId));
+        Assert.Equal(0, bDocumentCount);
+        Assert.Equal(0, Fixture.FileStorage.UploadUriCallCount);
     }
 
     [Fact]
@@ -56,6 +63,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(foreignResponse.StatusCode, missingResponse.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, foreignResponse.StatusCode);
+        Assert.Equal(0, Fixture.FileStorage.DownloadUriCallCount);
     }
 
     [Fact]

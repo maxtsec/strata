@@ -55,6 +55,16 @@ public class IntegrationTestFixture : IAsyncLifetime
 
     public FakeFileStorage FileStorage => Factory.FileStorage;
 
+    // Test-only escape hatch to assert persisted state directly against a
+    // fresh, correctly disposed DbContext — no production repository
+    // abstraction, just a scoped read for the duration of one assertion.
+    public async Task<T> QueryDbAsync<T>(Func<AppDbContext, Task<T>> query)
+    {
+        using var scope = Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await query(db);
+    }
+
     public async Task DisposeAsync()
     {
         await Factory.DisposeAsync();
