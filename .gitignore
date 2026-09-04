@@ -3,8 +3,9 @@
 ##
 ## Get latest from `dotnet new gitignore`
 
-# Claude Code project instructions (kept local, not part of the repo)
+# AI agent project instructions (kept local, not part of the repo)
 CLAUDE.md
+AGENTS.md
 
 # dotenv files
 .env
