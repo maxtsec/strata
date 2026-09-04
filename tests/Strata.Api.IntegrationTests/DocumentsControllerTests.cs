@@ -128,6 +128,24 @@ public class DocumentsControllerTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task Create_share_with_missing_role_returns_400()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-create-norole-a@test.local");
+        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-create-norole-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
+
+        // No "role" property at all — must not silently bind to the enum's
+        // zero value (Member) and grant edit access by omission.
+        var response = await clientA.PostAsJsonAsync($"/api/documents/{documentId}/shares",
+            new { Email = "shares-create-norole-b@test.local" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
+        Assert.Equal(0, shareCount);
+    }
+
+    [Fact]
     public async Task Create_share_with_self_returns_400()
     {
         var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-create-self@test.local");
@@ -292,6 +310,20 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
         Assert.Equal("renamed-by-member.txt", document.Name);
+    }
+
+    [Fact]
+    public async Task Member_can_download()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-download-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-download-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
+        await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-member-download-b@test.local", DocumentShare.Role.Member);
+
+        var response = await clientB.GetAsync($"/api/documents/{documentId}/download");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, Fixture.FileStorage.DownloadUriCallCount);
     }
 
     [Fact]

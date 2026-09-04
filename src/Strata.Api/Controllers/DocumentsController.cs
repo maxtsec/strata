@@ -127,7 +127,7 @@ public class DocumentsController : ControllerBase
             return NotFound();
         }
 
-        if (!Enum.IsDefined(request.Role))
+        if (request.Role is not { } role || !Enum.IsDefined(role))
         {
             return BadRequest("Invalid role.");
         }
@@ -155,7 +155,7 @@ public class DocumentsController : ControllerBase
             Id = Guid.NewGuid(),
             DocumentId = id,
             UserId = recipient.Id,
-            UserRole = request.Role
+            UserRole = role
         };
 
         _dbContext.DocumentShares.Add(documentShare);
@@ -250,4 +250,4 @@ public class DocumentsController : ControllerBase
 
 public record CreateDocumentRequest(string Name, Guid? FolderId, string ContentType, long Size);
 public record UpdateDocumentRequest(string Name);
-public record CreateShareRequest(string Email, DocumentShare.Role Role);
+public record CreateShareRequest(string Email, DocumentShare.Role? Role);
