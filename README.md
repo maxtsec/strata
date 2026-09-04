@@ -24,12 +24,11 @@ increment rather than a pile of untested code.
 **Phase 1 — Single-tenant core** *(current)*
 - [x] `Document` / `Folder` / `DocumentShare` domain entities
 - [x] ASP.NET Core Identity wired (Guid-keyed `ApplicationUser`, so it lines up with the entities' owner/user references with no string↔Guid conversion)
-- [x] EF Core migrations (applied to local dev DB; not yet applied to Azure SQL)
+- [x] EF Core migrations (applied to local dev DB and Azure SQL)
 - [x] Auth: `POST /api/auth/register` and `/login`, issuing JWTs
 - [x] File upload/download via Blob Storage — user-delegation SAS URIs, no static storage key anywhere
-- [ ] Folders CRUD
+- [x] Folders CRUD, with resource-based ownership authorization (`IOwnable` + `OwnerAuthorizationHandler`)
 - [ ] Roles / share links (the `DocumentShare` entity exists; no endpoints use it yet)
-- [ ] Apply the migration to Azure SQL
 
 ## Architecture
 
@@ -160,3 +159,64 @@ setup needed beyond the container already being up; the connection string
 defaults to the local/test credential above. Override it with the
 `STRATA_TEST_CONNECTION_STRING` environment variable if your container uses a
 different password; CI points it at its own SQL Server service container.
+
+### Applying migrations to Azure SQL
+
+Done from a developer machine, on demand — never automatically in CI (see
+Conventions). Azure SQL authenticates the same way Blob Storage does: no
+static SQL login, an Azure AD identity via `az login` instead.
+
+The SQL Server has a single, server-wide Azure AD administrator identity.
+Check who currently holds it before touching anything:
+
+```powershell
+az sql server ad-admin list --server sql-strata-dev --resource-group rg-strata-dev
+```
+
+If an admin is already set to a suitable identity, skip straight to the
+firewall step below. Only create or replace the admin if the server has none
+yet, or an intentional replacement is required (this call **overwrites**
+whichever identity currently holds it, so don't run it casually):
+
+```powershell
+$signedInUserId = az ad signed-in-user show --query id -o tsv
+az sql server ad-admin create --server sql-strata-dev --resource-group rg-strata-dev `
+  --display-name "<your name>" --object-id $signedInUserId
+```
+
+A personal account as admin is fine for this single-developer portfolio. With
+more than one developer, an Entra ID group (with each developer as a member)
+is the right shape instead, so admin membership changes without ever touching
+the SQL Server itself.
+
+Applying a migration needs your current IP allowed through the server
+firewall for the duration of the command, and nothing left open afterwards —
+including when the migration itself fails. Wrap it in `try`/`finally`: the
+`finally` block runs whether the `try` block completes, fails, or throws, so
+the firewall rule is removed either way instead of only on the happy path.
+
+```powershell
+$myIp = (Invoke-RestMethod -Uri "https://api.ipify.org?format=json").ip
+az sql server firewall-rule create --server sql-strata-dev --resource-group rg-strata-dev `
+  --name "dev-temp" --start-ip-address $myIp --end-ip-address $myIp
+
+try {
+  dotnet ef database update --project src/Strata.Infrastructure --startup-project src/Strata.Api `
+    --connection "Server=tcp:sql-strata-dev.database.windows.net,1433;Database=strata;Authentication=Active Directory Default;TrustServerCertificate=False;Encrypt=True;"
+
+  # Confirms the migration is applied, not just pending — lists every
+  # migration and flags any not yet reflected in the target database.
+  dotnet ef migrations list --project src/Strata.Infrastructure --startup-project src/Strata.Api `
+    --connection "Server=tcp:sql-strata-dev.database.windows.net,1433;Database=strata;Authentication=Active Directory Default;TrustServerCertificate=False;Encrypt=True;"
+}
+finally {
+  az sql server firewall-rule delete --server sql-strata-dev --resource-group rg-strata-dev --name "dev-temp"
+}
+```
+
+`Authentication=Active Directory Default` resolves the same credential chain
+as `DefaultAzureCredential` — the signed-in `az login` identity locally, the
+deployed App Service's managed identity in Azure. This is separate from how
+the *deployed app* connects to Azure SQL at runtime (that connection string
+still lives in Key Vault); this is only how a developer applies schema
+changes.
