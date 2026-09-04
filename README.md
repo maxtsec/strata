@@ -28,7 +28,7 @@ increment rather than a pile of untested code.
 - [x] Auth: `POST /api/auth/register` and `/login`, issuing JWTs
 - [x] File upload/download via Blob Storage — user-delegation SAS URIs, no static storage key anywhere
 - [x] Folders CRUD, with resource-based ownership authorization (`IOwnable` + `OwnerAuthorizationHandler`)
-- [ ] Roles / share links (the `DocumentShare` entity exists; no endpoints use it yet)
+- [ ] Roles / share links — `POST/GET/DELETE /api/documents/{id}/shares` exist, and a share grants the recipient download access via `DocumentAccessAuthorizationHandler`; `Member` and `Viewer` are stored but not yet differentiated (both grant identical access — there's no write/edit action yet for the distinction to gate)
 
 ## Architecture
 
