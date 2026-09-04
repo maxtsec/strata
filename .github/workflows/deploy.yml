@@ -37,7 +37,7 @@ jobs:
       - run: dotnet build --no-restore --configuration Release
       - run: dotnet test --no-build --configuration Release
         env:
-          STRATA_TEST_CONNECTION_STRING: "Server=localhost,1433;Database=StrataIntegrationTests;User Id=sa;Password=Strata_Dev_2026!;TrustServerCertificate=True;MultipleActiveResultSets=true"
+          STRATA_TEST_CONNECTION_STRING: "Server=tcp:127.0.0.1,1433;Database=StrataIntegrationTests;User Id=sa;Password=Strata_Dev_2026!;TrustServerCertificate=True;MultipleActiveResultSets=true"
 
   deploy:
     needs: build-and-test

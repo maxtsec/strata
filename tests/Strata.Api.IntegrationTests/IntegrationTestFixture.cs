@@ -15,7 +15,7 @@ namespace Strata.Api.IntegrationTests;
 public class IntegrationTestFixture : IAsyncLifetime
 {
     private const string ConnectionString =
-        "Server=localhost,1433;Database=StrataIntegrationTests;User Id=sa;Password=Strata_Dev_2026!;TrustServerCertificate=True;MultipleActiveResultSets=true";
+        "Server=tcp:127.0.0.1,1433;Database=StrataIntegrationTests;User Id=sa;Password=Strata_Dev_2026!;TrustServerCertificate=True;MultipleActiveResultSets=true";
 
     public StrataWebApplicationFactory Factory { get; private set; } = null!;
 

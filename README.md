@@ -130,7 +130,7 @@ $rng.GetBytes($jwtBytes)
 $jwtKey = [Convert]::ToBase64String($jwtBytes)
 $rng.Dispose()
 
-dotnet user-secrets set 'ConnectionStrings:DefaultConnection' 'Server=localhost,1433;Database=Strata;User Id=sa;Password=Strata_Dev_2026!;TrustServerCertificate=True;MultipleActiveResultSets=true' --project src/Strata.Api
+dotnet user-secrets set 'ConnectionStrings:DefaultConnection' 'Server=tcp:127.0.0.1,1433;Database=Strata;User Id=sa;Password=Strata_Dev_2026!;TrustServerCertificate=True;MultipleActiveResultSets=true' --project src/Strata.Api
 dotnet user-secrets set 'Jwt:SigningKey' $jwtKey --project src/Strata.Api
 az login
 dotnet ef database update --project src/Strata.Infrastructure --startup-project src/Strata.Api
