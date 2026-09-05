@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -431,5 +432,64 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         var stillExists = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().AnyAsync(s => s.Id == shareId));
         Assert.True(stillExists);
+    }
+
+    [Fact]
+    public async Task Create_document_stores_authenticated_tenant_id()
+    {
+        var client = Fixture.Factory.CreateClient();
+        var token = await TestApiHelpers.RegisterAsync(client, "docs-tenant-create@test.local");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var expectedTenantId = TestApiHelpers.TenantIdFromToken(token);
+
+        var documentId = await TestApiHelpers.CreateDocumentAsync(client, "tenant-doc.txt");
+
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        Assert.Equal(expectedTenantId, document.TenantId);
+    }
+
+    [Fact]
+    public async Task Create_document_ignores_client_supplied_tenant_id()
+    {
+        var client = Fixture.Factory.CreateClient();
+        var token = await TestApiHelpers.RegisterAsync(client, "docs-tenant-crafted@test.local");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var expectedTenantId = TestApiHelpers.TenantIdFromToken(token);
+        var craftedTenantId = Guid.NewGuid();
+
+        var response = await client.PostAsJsonAsync("/api/documents", new
+        {
+            Name = "crafted-doc.txt",
+            FolderId = (Guid?)null,
+            ContentType = "text/plain",
+            Size = 1L,
+            tenantId = craftedTenantId
+        });
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var documentId = json.GetProperty("documentId").GetGuid();
+
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        Assert.Equal(expectedTenantId, document.TenantId);
+        Assert.NotEqual(craftedTenantId, document.TenantId);
+    }
+
+    [Fact]
+    public async Task Create_share_stores_documents_tenant_id_not_recipients()
+    {
+        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-share-tenant-a@test.local");
+        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-share-tenant-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "shared-doc.txt");
+
+        var shareId = await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-share-tenant-b@test.local", DocumentShare.Role.Viewer);
+
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        var share = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().SingleAsync(s => s.Id == shareId));
+
+        // The recipient (client B) is a different tenant than the document's
+        // owner (client A) — every AuthenticatedClientAsync call registers a
+        // brand-new tenant. The share must still carry the document's
+        // tenant, not the recipient's.
+        Assert.Equal(document.TenantId, share.TenantId);
     }
 }

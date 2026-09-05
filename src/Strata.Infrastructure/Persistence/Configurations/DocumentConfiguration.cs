@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Strata.Domain.Documents;
+using Strata.Domain.Tenancy;
 using Strata.Infrastructure.Identity;
 
 namespace Strata.Infrastructure.Persistence.Configurations;
@@ -19,5 +20,12 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
             .WithMany()
             .HasForeignKey(d => d.FolderId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<Tenant>()
+            .WithMany()
+            .HasForeignKey(d => d.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(d => d.TenantId);
     }
 }

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -188,5 +189,43 @@ public class FoldersControllerTests : IntegrationTestBase
         var response = await client.DeleteAsync($"/api/folders/{folderId}");
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_folder_stores_authenticated_tenant_id()
+    {
+        var client = Fixture.Factory.CreateClient();
+        var token = await TestApiHelpers.RegisterAsync(client, "folders-tenant-create@test.local");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var expectedTenantId = TestApiHelpers.TenantIdFromToken(token);
+
+        var folderId = await TestApiHelpers.CreateFolderAsync(client, "Tenant-tagged folder");
+
+        var folder = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().SingleAsync(f => f.Id == folderId));
+        Assert.Equal(expectedTenantId, folder.TenantId);
+    }
+
+    [Fact]
+    public async Task Create_folder_ignores_client_supplied_tenant_id()
+    {
+        var client = Fixture.Factory.CreateClient();
+        var token = await TestApiHelpers.RegisterAsync(client, "folders-tenant-crafted@test.local");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var expectedTenantId = TestApiHelpers.TenantIdFromToken(token);
+        var craftedTenantId = Guid.NewGuid();
+
+        var response = await client.PostAsJsonAsync("/api/folders", new
+        {
+            Name = "Crafted folder",
+            ParentFolderId = (Guid?)null,
+            tenantId = craftedTenantId
+        });
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var folderId = json.GetProperty("folderId").GetGuid();
+
+        var folder = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().SingleAsync(f => f.Id == folderId));
+        Assert.Equal(expectedTenantId, folder.TenantId);
+        Assert.NotEqual(craftedTenantId, folder.TenantId);
     }
 }
