@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Strata.Domain.Documents;
+using Strata.Domain.Tenancy;
 using Strata.Infrastructure.Identity;
 using Strata.Application.Persistence;
 
@@ -16,6 +17,7 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
     public DbSet<Document> Documents { get; set; }
     public DbSet<DocumentShare> DocumentShares { get; set; }
     public DbSet<Folder> Folders { get; set; }
+    public DbSet<Tenant> Tenants { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
