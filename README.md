@@ -9,7 +9,7 @@ separately owned lots, shared structure underneath. That's multi-tenancy in
 physical form — many customer organisations on one deployment, each fully
 isolated from the others.
 
-## Status: Phase 1 in progress
+## Status: Phase 2 — Multi-tenant retrofit in progress
 
 This project is being built in phases, each ending in a working, deployed
 increment rather than a pile of untested code.
@@ -21,14 +21,36 @@ increment rather than a pile of untested code.
 - [x] CI/CD via GitHub Actions (OIDC — no long-lived Azure credential stored in GitHub)
 - [x] Azure SQL provisioned, connection string in Key Vault (App Service reads it via its managed identity)
 
-**Phase 1 — Single-tenant core** *(current)*
+**Phase 1 — Single-tenant core** *(complete)*
 - [x] `Document` / `Folder` / `DocumentShare` domain entities
 - [x] ASP.NET Core Identity wired (Guid-keyed `ApplicationUser`, so it lines up with the entities' owner/user references with no string↔Guid conversion)
 - [x] EF Core migrations (applied to local dev DB and Azure SQL)
 - [x] Auth: `POST /api/auth/register` and `/login`, issuing JWTs
 - [x] File upload/download via Blob Storage — user-delegation SAS URIs, no static storage key anywhere
 - [x] Folders CRUD, with resource-based ownership authorization (`IOwnable` + `OwnerAuthorizationHandler`)
-- [ ] Roles / share links — `POST/GET/DELETE /api/documents/{id}/shares` exist, and a share grants the recipient download access via `DocumentAccessAuthorizationHandler`; `Member` and `Viewer` are stored but not yet differentiated (both grant identical access — there's no write/edit action yet for the distinction to gate)
+- [x] Roles / share links — the owner manages the document and its shares; a `Member` can download and rename; a `Viewer` can download but not rename; neither `Member` nor `Viewer` can create, list, or delete shares; missing and unauthorized resources use anti-enumeration responses where implemented
+
+**Phase 2 — Multi-tenant retrofit** *(current)*
+- [x] Shared-schema `Tenant` entity, with the tenancy model recorded as [ADR 0004](docs/adr/0004-shared-database-shared-schema-tenancy.md)
+- [x] Required `ApplicationUser.TenantId`; registration creates the `Tenant` and its first user atomically; pre-existing legacy users safely backfilled to a deterministic Legacy Tenant
+- [x] JWTs carry a signed `tenant_id` claim; JWT authentication rejects missing, malformed, empty, or duplicate tenant claims
+- [x] Request-scoped `ICurrentTenant` provides the trusted tenant identity to the rest of the app
+- [x] `ITenantOwned` introduced, and a required `TenantId` added to `Folder`, `Document`, and `DocumentShare`, with existing rows backfilled from their real relationships (a share's `TenantId` follows the document, not the recipient) and tenant foreign keys/indexes added
+- [x] New create paths assign tenant identity server-side rather than accepting it from the client
+- [x] Migration rehearsed against a disposable SQL Server database, including its fail-closed behavior, before being applied anywhere real
+- [x] Resource `TenantId` migration applied and verified against Azure SQL
+- [ ] EF Core global query filters for read isolation
+- [ ] A `SaveChanges` interceptor for write isolation
+- [ ] Same-tenant relationship enforcement, especially document sharing
+- [ ] A complete adversarial two-tenant integration-test matrix in CI
+- [ ] Tenant-isolation ADR finalized once the enforcement design above is in place
+
+Tenant IDs are now trusted and correctly persisted, but tenant isolation is
+not complete until read filters, write interception, relationship
+validation, and adversarial tests are all in place. Owner authorization is
+not a substitute for tenant isolation — it happens to block most
+cross-tenant access today, but nothing currently enforces it at the tenant
+boundary.
 
 ## Architecture
 
@@ -60,8 +82,8 @@ in `docs/adr/`.
 ## Roadmap
 
 0. **Walking skeleton** — empty API, deployed, CI/CD green *(complete)*
-1. **Single-tenant core** *(current)* — users, documents, folders, auth, file upload/download, roles, share links
-2. **Multi-tenant retrofit** — tenant resolution, EF Core global query filters, a `SaveChanges` interceptor to close the gap query filters leave on writes, then integration tests in CI that try to break the isolation between two tenants
+1. **Single-tenant core** *(complete)* — users, documents, folders, auth, file upload/download, roles, share links
+2. **Multi-tenant retrofit** *(current)* — tenant resolution, EF Core global query filters, a `SaveChanges` interceptor to close the gap query filters leave on writes, then integration tests in CI that try to break the isolation between two tenants
 3. **Notification subsystem** — pluggable channel abstraction (email, in-app), background dispatch, retry with backoff, idempotency
 4. **Production hardening** — structured logging, global exception handling, health checks, rate limiting
 5. **Multi-tenant RAG** — semantic search and Q&A over each tenant's own documents; the interesting problem is that tenant isolation has to hold in the vector layer too, a weaker, easier-to-leak system than the relational one
