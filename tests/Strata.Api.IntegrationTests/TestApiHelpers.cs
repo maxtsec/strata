@@ -16,9 +16,9 @@ public static class TestApiHelpers
         return client;
     }
 
-    public static async Task<string> RegisterAsync(HttpClient client, string email, string password = "P@ssw0rd123!")
+    public static async Task<string> RegisterAsync(HttpClient client, string email, string password = "P@ssw0rd123!", string tenantName = "Test Tenant")
     {
-        var response = await client.PostAsJsonAsync("/api/auth/register", new { Email = email, Password = password });
+        var response = await client.PostAsJsonAsync("/api/auth/register", new { Email = email, Password = password, TenantName = tenantName });
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
