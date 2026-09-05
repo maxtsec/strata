@@ -80,13 +80,17 @@ differently:
   touches, and nothing described in this ADR would catch that.
 
 Project policy, effective now even though nothing enforces it yet:
-**`ExecuteUpdate`, `ExecuteDelete`, and raw SQL must not be used on
-tenant-owned data unless they receive a separate tenant-isolation design
-review, explicit enforcement, and adversarial integration tests.** No
-command interceptor, wrapper abstraction, or database-level Row-Level
-Security is introduced in this PR to cover that gap — the policy above is
-the containment for now, and closing it properly is later work, not
-something to improvise on the day someone reaches for `ExecuteUpdate`.
+**`IgnoreQueryFilters`, `ExecuteUpdate`, `ExecuteDelete`, and raw SQL must
+not be used on tenant-owned data unless they receive a separate
+tenant-isolation design review, explicit enforcement, and adversarial
+integration tests.** `IgnoreQueryFilters` belongs on that list for the same
+reason as the other two: a global query filter is a default a query
+participates in, not a boundary it's kept inside of, and a single
+documented call switches it off for any query that makes it. No command
+interceptor, wrapper abstraction, or database-level Row-Level Security is
+introduced in this PR to cover that gap — the policy above is the
+containment for now, and closing it properly is later work, not something
+to improvise on the day someone reaches for one of these.
 
 A schema change (a new column, a new table) is felt by every tenant at
 once — there is no way to roll a migration out to one tenant first, unlike
@@ -112,10 +116,15 @@ this phase, listed here so the plan is visible before it's built:
   request-scoped tenant context — never accepted from a request body or
   query string.
 - **EF Core global query filters** on every tenant-owned entity, scoping
-  every EF query path — ordinary reads, and the source-row selection of
-  any `ExecuteUpdate`/`ExecuteDelete` — to the current request's tenant
-  automatically. This does not validate values a bulk statement assigns
-  (see Costs and risks); it only narrows which rows a query can touch.
+  EF LINQ query paths by default — ordinary reads, and the source-row
+  selection of any `ExecuteUpdate`/`ExecuteDelete` — to the current
+  request's tenant. "By default" is doing real work in that sentence: any
+  query can opt out with `.IgnoreQueryFilters()`, a documented, one-line
+  EF Core call, which is why the policy below now covers it explicitly
+  rather than treating the filter as a hard boundary. It also does not
+  validate values a bulk statement assigns (see Costs and risks); it only
+  narrows which rows a query can touch, and only when nothing has
+  disabled it.
 - **A `SaveChanges` interceptor**, protecting only change-tracked writes
   that pass through `SaveChangesAsync` — every `Added`, `Modified`, and
   `Deleted` entity gets a second, independent check at the point it's
