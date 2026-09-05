@@ -9,6 +9,11 @@ namespace Strata.Infrastructure.Identity;
 
 public class JwtTokenGenerator
 {
+    // Shared with HttpContextCurrentTenant (Strata.Api), which reads this
+    // same claim type back out of an authenticated request. One constant so
+    // the two sides can't drift apart into two different literal strings.
+    public const string TenantIdClaimType = "tenant_id";
+
     private readonly IConfiguration _configuration;
 
     public JwtTokenGenerator(IConfiguration configuration)
@@ -22,6 +27,7 @@ public class JwtTokenGenerator
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty),
+            new(TenantIdClaimType, user.TenantId.ToString()),
         };
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
 

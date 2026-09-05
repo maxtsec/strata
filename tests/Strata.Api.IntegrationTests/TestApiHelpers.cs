@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Strata.Domain.Documents;
+using Strata.Infrastructure.Identity;
 
 namespace Strata.Api.IntegrationTests;
 
@@ -30,6 +31,13 @@ public static class TestApiHelpers
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
         var sub = jwt.Claims.First(c => c.Type == JwtRegisteredClaimNames.Sub).Value;
         return Guid.Parse(sub);
+    }
+
+    public static Guid TenantIdFromToken(string token)
+    {
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        var tenantId = jwt.Claims.First(c => c.Type == JwtTokenGenerator.TenantIdClaimType).Value;
+        return Guid.Parse(tenantId);
     }
 
     public static async Task<Guid> CreateFolderAsync(HttpClient client, string name, Guid? parentFolderId = null)
