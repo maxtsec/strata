@@ -40,6 +40,24 @@ builder.Services
             IssuerSigningKey = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(
                 System.Text.Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SigningKey"]!))
         };
+        // Runs after normal signature/lifetime validation succeeds. A token
+        // that is otherwise perfectly valid but missing (or mangling) its
+        // tenant claim must not be treated as authenticated at all — this is
+        // a claim check, not a database lookup, so it stays cheap and doesn't
+        // reach into tenant data to validate tenant identity.
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                var claims = context.Principal?.Claims ?? [];
+                if (!TenantClaimTypes.TryGetValidTenantId(claims, out _))
+                {
+                    context.Fail("Token is missing a valid, single, non-empty tenant_id claim.");
+                }
+
+                return Task.CompletedTask;
+            }
+        };
     });
 builder.Services.AddScoped<JwtTokenGenerator>();
 builder.Services.AddHttpContextAccessor();

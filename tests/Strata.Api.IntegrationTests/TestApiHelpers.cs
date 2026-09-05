@@ -1,9 +1,12 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
+using Microsoft.IdentityModel.Tokens;
+using Strata.Application.Tenancy;
 using Strata.Domain.Documents;
-using Strata.Infrastructure.Identity;
 
 namespace Strata.Api.IntegrationTests;
 
@@ -36,8 +39,26 @@ public static class TestApiHelpers
     public static Guid TenantIdFromToken(string token)
     {
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
-        var tenantId = jwt.Claims.First(c => c.Type == JwtTokenGenerator.TenantIdClaimType).Value;
+        var tenantId = jwt.Claims.First(c => c.Type == TenantClaimTypes.TenantId).Value;
         return Guid.Parse(tenantId);
+    }
+
+    // Hand-crafts a token signed with the test host's own signing key, so it
+    // passes real signature and lifetime validation — only the supplied
+    // claims are under the test's control. Used to exercise the tenant-claim
+    // validation at the authentication boundary directly, independent of the
+    // normal register/login issuance path.
+    public static string CreateToken(IEnumerable<Claim> claims, TimeSpan? lifetime = null)
+    {
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(StrataWebApplicationFactory.TestSigningKey));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            claims: claims,
+            expires: DateTime.UtcNow.Add(lifetime ?? TimeSpan.FromHours(1)),
+            signingCredentials: credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
     public static async Task<Guid> CreateFolderAsync(HttpClient client, string name, Guid? parentFolderId = null)
