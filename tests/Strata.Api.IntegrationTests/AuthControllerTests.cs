@@ -23,7 +23,8 @@ public class AuthControllerTests : IntegrationTestBase
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var userId = TestApiHelpers.UserIdFromToken(json.GetProperty("token").GetString()!);
+        var token = json.GetProperty("token").GetString()!;
+        var userId = TestApiHelpers.UserIdFromToken(token);
 
         var tenants = await Fixture.QueryDbAsync(db => db.Tenants.AsNoTracking().ToListAsync());
         var tenant = Assert.Single(tenants);
@@ -33,6 +34,26 @@ public class AuthControllerTests : IntegrationTestBase
 
         var user = await Fixture.QueryDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Id == userId));
         Assert.Equal(tenant.Id, user.TenantId);
+
+        Assert.Equal(tenant.Id, TestApiHelpers.TenantIdFromToken(token));
+    }
+
+    [Fact]
+    public async Task Login_issues_a_token_carrying_the_users_tenant_id()
+    {
+        var client = Fixture.Factory.CreateClient();
+        var registerToken = await TestApiHelpers.RegisterAsync(client, "tenant-login@test.local", tenantName: "Login Co");
+        var expectedTenantId = TestApiHelpers.TenantIdFromToken(registerToken);
+
+        var response = await client.PostAsJsonAsync("/api/auth/login",
+            new { Email = "tenant-login@test.local", Password = "P@ssw0rd123!" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var loginToken = json.GetProperty("token").GetString()!;
+
+        Assert.Equal(expectedTenantId, TestApiHelpers.TenantIdFromToken(loginToken));
     }
 
     [Fact]
