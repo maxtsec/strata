@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Strata.Api.Authorization;
 using Strata.Application.Persistence;
+using Strata.Application.Tenancy;
 using Strata.Domain.Documents;
 
 namespace Strata.Api.Controllers;
@@ -16,11 +17,13 @@ public class FoldersController : ControllerBase
 {
     private readonly IApplicationDbContext _dbContext;
     private readonly IAuthorizationService _authorizationService;
+    private readonly ICurrentTenant _currentTenant;
 
-    public FoldersController(IApplicationDbContext dbContext, IAuthorizationService authorizationService)
+    public FoldersController(IApplicationDbContext dbContext, IAuthorizationService authorizationService, ICurrentTenant currentTenant)
     {
         _dbContext = dbContext;
         _authorizationService = authorizationService;
+        _currentTenant = currentTenant;
     }
 
     private Guid? CurrentUserId =>
@@ -43,6 +46,7 @@ public class FoldersController : ControllerBase
         {
             Id = Guid.NewGuid(),
             OwnerId = userId,
+            TenantId = _currentTenant.TenantId,
             ParentFolderId = request.ParentFolderId,
             Name = request.Name
         };

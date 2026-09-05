@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Strata.Api.Authorization;
 using Strata.Application.Persistence;
+using Strata.Application.Tenancy;
 using Strata.Domain.Documents;
 using Strata.Infrastructure.Identity;
 
@@ -21,17 +22,20 @@ public class DocumentsController : ControllerBase
     private readonly IFileStorage _fileStorage;
     private readonly IAuthorizationService _authorizationService;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly ICurrentTenant _currentTenant;
 
     public DocumentsController(
         IApplicationDbContext dbContext,
         IFileStorage fileStorage,
         IAuthorizationService authorizationService,
-        UserManager<ApplicationUser> userManager)
+        UserManager<ApplicationUser> userManager,
+        ICurrentTenant currentTenant)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
         _authorizationService = authorizationService;
         _userManager = userManager;
+        _currentTenant = currentTenant;
     }
 
     private Guid? CurrentUserId =>
@@ -55,6 +59,7 @@ public class DocumentsController : ControllerBase
             Id = Guid.NewGuid(),
             Name = request.Name,
             OwnerId = userId,
+            TenantId = _currentTenant.TenantId,
             FolderId = request.FolderId,
             ContentType = request.ContentType,
             Size = request.Size
@@ -127,6 +132,18 @@ public class DocumentsController : ControllerBase
             return NotFound();
         }
 
+        // Owner-only authorization above already guarantees the caller owns
+        // this document, so their tenant and the document's tenant should
+        // never disagree. Asserting it rather than assuming it: a silent
+        // mismatch here would mean a share got labelled with the wrong
+        // tenant, which nothing downstream would catch on its own.
+        if (document.TenantId != _currentTenant.TenantId)
+        {
+            throw new InvalidOperationException(
+                "Document owner's current tenant does not match the document's own tenant — " +
+                "this should be unreachable given owner-only authorization.");
+        }
+
         if (request.Role is not { } role || !Enum.IsDefined(role))
         {
             return BadRequest("Invalid role.");
@@ -150,11 +167,16 @@ public class DocumentsController : ControllerBase
             return Conflict("Document is already shared with this user.");
         }
 
+        // The share's tenant follows the document being shared, not the
+        // recipient — same-tenant recipient enforcement is later work, but
+        // the share itself must always be labelled with its document's
+        // tenant, never the recipient's.
         var documentShare = new DocumentShare
         {
             Id = Guid.NewGuid(),
             DocumentId = id,
             UserId = recipient.Id,
+            TenantId = document.TenantId,
             UserRole = role
         };
 
