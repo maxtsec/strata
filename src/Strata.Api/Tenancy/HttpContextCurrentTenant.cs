@@ -1,5 +1,4 @@
 using Strata.Application.Tenancy;
-using Strata.Infrastructure.Identity;
 
 namespace Strata.Api.Tenancy;
 
@@ -9,14 +8,16 @@ public class HttpContextCurrentTenant : ICurrentTenant
 
     public HttpContextCurrentTenant(IHttpContextAccessor httpContextAccessor)
     {
-        var claim = httpContextAccessor.HttpContext?.User.FindFirst(JwtTokenGenerator.TenantIdClaimType)?.Value;
+        var claims = httpContextAccessor.HttpContext?.User.Claims ?? [];
 
-        if (!Guid.TryParse(claim, out var tenantId))
+        if (!TenantClaimTypes.TryGetValidTenantId(claims, out var tenantId))
         {
             throw new InvalidOperationException(
-                "The current request has no valid tenant_id claim. Every authenticated " +
-                "user has a required TenantId, so a missing or malformed claim here means " +
-                "either a bug in token issuance or a tampered token — not a case to default around.");
+                "The current request has no valid tenant_id claim — either missing, " +
+                "not a Guid, Guid.Empty, or present more than once. The JWT bearer " +
+                "authentication boundary should already reject such tokens with 401, " +
+                "so reaching this constructor with an invalid claim means either a bug " +
+                "in that validation or a tampered token — not a case to default around.");
         }
 
         TenantId = tenantId;

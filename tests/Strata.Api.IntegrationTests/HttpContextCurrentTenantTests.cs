@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Strata.Api.Tenancy;
-using Strata.Infrastructure.Identity;
+using Strata.Application.Tenancy;
 
 namespace Strata.Api.IntegrationTests;
 
@@ -11,7 +11,7 @@ public class HttpContextCurrentTenantTests
     public void Resolves_tenant_id_from_a_valid_claim()
     {
         var tenantId = Guid.NewGuid();
-        var accessor = AccessorWithClaim(JwtTokenGenerator.TenantIdClaimType, tenantId.ToString());
+        var accessor = AccessorWithClaims(new Claim(TenantClaimTypes.TenantId, tenantId.ToString()));
 
         var currentTenant = new HttpContextCurrentTenant(accessor);
 
@@ -21,7 +21,7 @@ public class HttpContextCurrentTenantTests
     [Fact]
     public void Throws_when_the_claim_is_missing()
     {
-        var accessor = AccessorWithClaim(claimType: null, claimValue: null);
+        var accessor = AccessorWithClaims();
 
         Assert.Throws<InvalidOperationException>(() => new HttpContextCurrentTenant(accessor));
     }
@@ -29,7 +29,25 @@ public class HttpContextCurrentTenantTests
     [Fact]
     public void Throws_when_the_claim_is_not_a_valid_guid()
     {
-        var accessor = AccessorWithClaim(JwtTokenGenerator.TenantIdClaimType, "not-a-guid");
+        var accessor = AccessorWithClaims(new Claim(TenantClaimTypes.TenantId, "not-a-guid"));
+
+        Assert.Throws<InvalidOperationException>(() => new HttpContextCurrentTenant(accessor));
+    }
+
+    [Fact]
+    public void Throws_when_the_claim_is_guid_empty()
+    {
+        var accessor = AccessorWithClaims(new Claim(TenantClaimTypes.TenantId, Guid.Empty.ToString()));
+
+        Assert.Throws<InvalidOperationException>(() => new HttpContextCurrentTenant(accessor));
+    }
+
+    [Fact]
+    public void Throws_when_there_are_duplicate_tenant_id_claims()
+    {
+        var accessor = AccessorWithClaims(
+            new Claim(TenantClaimTypes.TenantId, Guid.NewGuid().ToString()),
+            new Claim(TenantClaimTypes.TenantId, Guid.NewGuid().ToString()));
 
         Assert.Throws<InvalidOperationException>(() => new HttpContextCurrentTenant(accessor));
     }
@@ -42,12 +60,8 @@ public class HttpContextCurrentTenantTests
         Assert.Throws<InvalidOperationException>(() => new HttpContextCurrentTenant(accessor));
     }
 
-    private static IHttpContextAccessor AccessorWithClaim(string? claimType, string? claimValue)
+    private static IHttpContextAccessor AccessorWithClaims(params Claim[] claims)
     {
-        var claims = claimType is null
-            ? []
-            : new[] { new Claim(claimType, claimValue!) };
-
         var identity = new ClaimsIdentity(claims, authenticationType: "TestAuth");
         var httpContext = new DefaultHttpContext
         {
