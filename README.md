@@ -39,18 +39,19 @@ increment rather than a pile of untested code.
 - [x] New create paths assign tenant identity server-side rather than accepting it from the client
 - [x] Migration rehearsed against a disposable SQL Server database, including its fail-closed behavior, before being applied anywhere real
 - [x] Resource `TenantId` migration applied and verified against Azure SQL
-- [ ] EF Core global query filters for read isolation
+- [x] EF Core global query filters on `Folder`, `Document`, and `DocumentShare` for read isolation, backed by adversarial integration tests (a resource owned by the current user but labelled with a foreign tenant is still unreachable)
 - [ ] A `SaveChanges` interceptor for write isolation
 - [ ] Same-tenant relationship enforcement, especially document sharing
 - [ ] A complete adversarial two-tenant integration-test matrix in CI
 - [ ] Tenant-isolation ADR finalized once the enforcement design above is in place
 
-Tenant IDs are now trusted and correctly persisted, but tenant isolation is
-not complete until read filters, write interception, relationship
-validation, and adversarial tests are all in place. Owner authorization is
-not a substitute for tenant isolation — it happens to block most
-cross-tenant access today, but nothing currently enforces it at the tenant
-boundary.
+Tenant IDs are now trusted and correctly persisted, and reads are now
+filtered by tenant, but isolation is not complete until write interception,
+relationship validation, and the full adversarial test matrix are also in
+place. Owner authorization is not a substitute for tenant isolation — it
+happens to block most cross-tenant access today, and the read filter now
+backs it up independently, but nothing yet stops a write from crossing a
+tenant boundary.
 
 ## Architecture
 

@@ -76,7 +76,7 @@ public class DocumentsController : ControllerBase
     [HttpGet("{id}/download")]
     public async Task<IActionResult> GetDownloadUrl(Guid id, CancellationToken cancellationToken)
     {
-        var document = await _dbContext.Documents.FindAsync(new object[] { id }, cancellationToken);
+        var document = await _dbContext.Documents.SingleOrDefaultAsync(d => d.Id == id, cancellationToken);
 
         if (document == null)
         {
@@ -98,7 +98,7 @@ public class DocumentsController : ControllerBase
     [HttpPut("{id}")]
     public async Task<IActionResult> Rename(Guid id, UpdateDocumentRequest request, CancellationToken cancellationToken)
     {
-        var document = await _dbContext.Documents.FindAsync(new object[] { id }, cancellationToken);
+        var document = await _dbContext.Documents.SingleOrDefaultAsync(d => d.Id == id, cancellationToken);
         if (document is null)
         {
             return NotFound();
@@ -120,7 +120,7 @@ public class DocumentsController : ControllerBase
     [HttpPost("{id}/shares")]
     public async Task<IActionResult> CreateShare(Guid id, CreateShareRequest request, CancellationToken cancellationToken)
     {
-        var document = await _dbContext.Documents.FindAsync(new object[] { id }, cancellationToken);
+        var document = await _dbContext.Documents.SingleOrDefaultAsync(d => d.Id == id, cancellationToken);
         if (document is null)
         {
             return NotFound();
@@ -210,7 +210,7 @@ public class DocumentsController : ControllerBase
     [HttpGet("{id}/shares")]
     public async Task<IActionResult> ListShares(Guid id, CancellationToken cancellationToken)
     {
-        var document = await _dbContext.Documents.FindAsync(new object[] { id }, cancellationToken);
+        var document = await _dbContext.Documents.SingleOrDefaultAsync(d => d.Id == id, cancellationToken);
         if (document is null)
         {
             return NotFound();
@@ -232,7 +232,7 @@ public class DocumentsController : ControllerBase
     [HttpDelete("{id}/shares/{shareId}")]
     public async Task<IActionResult> DeleteShare(Guid id, Guid shareId, CancellationToken cancellationToken)
     {
-        var document = await _dbContext.Documents.FindAsync(new object[] { id }, cancellationToken);
+        var document = await _dbContext.Documents.SingleOrDefaultAsync(d => d.Id == id, cancellationToken);
         if (document is null)
         {
             return NotFound();
@@ -259,7 +259,7 @@ public class DocumentsController : ControllerBase
 
     private async Task<bool> IsFolderOwnedByCurrentUser(Guid folderId, CancellationToken cancellationToken)
     {
-        var folder = await _dbContext.Folders.FindAsync(new object[] { folderId }, cancellationToken);
+        var folder = await _dbContext.Folders.SingleOrDefaultAsync(f => f.Id == folderId, cancellationToken);
         if (folder is null)
         {
             return false;

@@ -39,7 +39,7 @@ public class FoldersControllerTests : IntegrationTestBase
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
         var folder = await Fixture.QueryDbAsync(db =>
-            db.Folders.AsNoTracking().SingleAsync(f => f.Id == folderId));
+            db.Folders.AsNoTracking().IgnoreQueryFilters().SingleAsync(f => f.Id == folderId));
         Assert.Equal("A's folder", folder.Name);
         Assert.Null(folder.ParentFolderId);
     }
@@ -56,7 +56,7 @@ public class FoldersControllerTests : IntegrationTestBase
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
         var stillExists = await Fixture.QueryDbAsync(db =>
-            db.Folders.AsNoTracking().AnyAsync(f => f.Id == folderId));
+            db.Folders.AsNoTracking().IgnoreQueryFilters().AnyAsync(f => f.Id == folderId));
         Assert.True(stillExists);
     }
 
@@ -83,13 +83,13 @@ public class FoldersControllerTests : IntegrationTestBase
         var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "folders-createparent-b@test.local");
         var aFolderId = await TestApiHelpers.CreateFolderAsync(clientA, "A's folder");
 
-        var folderCountBefore = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().CountAsync());
+        var folderCountBefore = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().IgnoreQueryFilters().CountAsync());
 
         var response = await clientB.PostAsJsonAsync("/api/folders", new { Name = "B's folder", ParentFolderId = aFolderId });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var folderCountAfter = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().CountAsync());
+        var folderCountAfter = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().IgnoreQueryFilters().CountAsync());
         Assert.Equal(folderCountBefore, folderCountAfter);
     }
 
@@ -106,7 +106,7 @@ public class FoldersControllerTests : IntegrationTestBase
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         var bFolder = await Fixture.QueryDbAsync(db =>
-            db.Folders.AsNoTracking().SingleAsync(f => f.Id == bFolderId));
+            db.Folders.AsNoTracking().IgnoreQueryFilters().SingleAsync(f => f.Id == bFolderId));
         Assert.Equal("B's folder", bFolder.Name);
         Assert.Null(bFolder.ParentFolderId);
     }
@@ -122,7 +122,7 @@ public class FoldersControllerTests : IntegrationTestBase
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         var folder = await Fixture.QueryDbAsync(db =>
-            db.Folders.AsNoTracking().SingleAsync(f => f.Id == folderId));
+            db.Folders.AsNoTracking().IgnoreQueryFilters().SingleAsync(f => f.Id == folderId));
         Assert.Equal("Folder", folder.Name);
         Assert.Null(folder.ParentFolderId);
     }
@@ -141,7 +141,7 @@ public class FoldersControllerTests : IntegrationTestBase
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         var folderA = await Fixture.QueryDbAsync(db =>
-            db.Folders.AsNoTracking().SingleAsync(f => f.Id == aId));
+            db.Folders.AsNoTracking().IgnoreQueryFilters().SingleAsync(f => f.Id == aId));
         Assert.Equal("A", folderA.Name);
         Assert.Null(folderA.ParentFolderId);
     }
@@ -157,8 +157,8 @@ public class FoldersControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
-        var parentExists = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().AnyAsync(f => f.Id == parentId));
-        var childExists = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().AnyAsync(f => f.Id == childId));
+        var parentExists = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().IgnoreQueryFilters().AnyAsync(f => f.Id == parentId));
+        var childExists = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().IgnoreQueryFilters().AnyAsync(f => f.Id == childId));
         Assert.True(parentExists);
         Assert.True(childExists);
     }
@@ -174,8 +174,8 @@ public class FoldersControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
-        var folderExists = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().AnyAsync(f => f.Id == folderId));
-        var documentExists = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().AnyAsync(d => d.Id == documentId));
+        var folderExists = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().IgnoreQueryFilters().AnyAsync(f => f.Id == folderId));
+        var documentExists = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().AnyAsync(d => d.Id == documentId));
         Assert.True(folderExists);
         Assert.True(documentExists);
     }
@@ -201,7 +201,7 @@ public class FoldersControllerTests : IntegrationTestBase
 
         var folderId = await TestApiHelpers.CreateFolderAsync(client, "Tenant-tagged folder");
 
-        var folder = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().SingleAsync(f => f.Id == folderId));
+        var folder = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().IgnoreQueryFilters().SingleAsync(f => f.Id == folderId));
         Assert.Equal(expectedTenantId, folder.TenantId);
     }
 
@@ -224,7 +224,7 @@ public class FoldersControllerTests : IntegrationTestBase
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         var folderId = json.GetProperty("folderId").GetGuid();
 
-        var folder = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().SingleAsync(f => f.Id == folderId));
+        var folder = await Fixture.QueryDbAsync(db => db.Folders.AsNoTracking().IgnoreQueryFilters().SingleAsync(f => f.Id == folderId));
         Assert.Equal(expectedTenantId, folder.TenantId);
         Assert.NotEqual(craftedTenantId, folder.TenantId);
     }

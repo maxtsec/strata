@@ -13,6 +13,17 @@ public class DocumentsControllerTests : IntegrationTestBase
     {
     }
 
+    // Registers a brand-new tenant (as every registration does) and returns
+    // its id alongside the client, so a same-tenant sibling can be minted for
+    // it via TestApiHelpers.AuthenticatedSameTenantClientAsync.
+    private async Task<(HttpClient Client, Guid TenantId)> AuthenticatedOwnerAsync(string email)
+    {
+        var client = Fixture.Factory.CreateClient();
+        var token = await TestApiHelpers.RegisterAsync(client, email);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return (client, TestApiHelpers.TenantIdFromToken(token));
+    }
+
     [Fact]
     public async Task Create_with_foreign_folder_returns_400()
     {
@@ -20,7 +31,7 @@ public class DocumentsControllerTests : IntegrationTestBase
         var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-createfolder-b@test.local");
         var aFolderId = await TestApiHelpers.CreateFolderAsync(clientA, "A's folder");
 
-        var documentCountBefore = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().CountAsync());
+        var documentCountBefore = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().CountAsync());
 
         var response = await clientB.PostAsJsonAsync("/api/documents", new
         {
@@ -32,7 +43,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var documentCountAfter = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().CountAsync());
+        var documentCountAfter = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().CountAsync());
         Assert.Equal(documentCountBefore, documentCountAfter);
         Assert.Equal(0, Fixture.FileStorage.UploadUriCallCount);
     }
@@ -93,7 +104,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
-        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
+        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().CountAsync(s => s.DocumentId == documentId));
         Assert.Equal(0, shareCount);
     }
 
@@ -108,7 +119,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
+        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().CountAsync(s => s.DocumentId == documentId));
         Assert.Equal(0, shareCount);
     }
 
@@ -124,7 +135,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
+        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().CountAsync(s => s.DocumentId == documentId));
         Assert.Equal(0, shareCount);
     }
 
@@ -142,7 +153,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
+        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().CountAsync(s => s.DocumentId == documentId));
         Assert.Equal(0, shareCount);
     }
 
@@ -157,7 +168,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
+        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().CountAsync(s => s.DocumentId == documentId));
         Assert.Equal(0, shareCount);
     }
 
@@ -174,7 +185,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
-        var shares = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().Where(s => s.DocumentId == documentId).ToListAsync());
+        var shares = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().Where(s => s.DocumentId == documentId).ToListAsync());
         var share = Assert.Single(shares);
         Assert.Equal(DocumentShare.Role.Viewer, share.UserRole);
     }
@@ -182,8 +193,8 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task Create_share_grants_recipient_download_access()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-grant-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-grant-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("shares-grant-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "shares-grant-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
 
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "shares-grant-b@test.local", DocumentShare.Role.Viewer);
@@ -249,7 +260,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
-        var stillExists = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().AnyAsync(s => s.Id == shareId));
+        var stillExists = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().AnyAsync(s => s.Id == shareId));
         Assert.True(stillExists);
     }
 
@@ -275,7 +286,7 @@ public class DocumentsControllerTests : IntegrationTestBase
         var deleteResponse = await clientA.DeleteAsync($"/api/documents/{documentId}/shares/{shareId}");
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
-        var stillExists = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().AnyAsync(s => s.Id == shareId));
+        var stillExists = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().AnyAsync(s => s.Id == shareId));
         Assert.False(stillExists);
 
         var downloadResponse = await clientB.GetAsync($"/api/documents/{documentId}/download");
@@ -293,15 +304,15 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
-        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().SingleAsync(d => d.Id == documentId));
         Assert.Equal("renamed.txt", document.Name);
     }
 
     [Fact]
     public async Task Rename_by_member_succeeds()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-member-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-member-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("docs-rename-member-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "docs-rename-member-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "original.txt");
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-rename-member-b@test.local", DocumentShare.Role.Member);
 
@@ -309,15 +320,15 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
-        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().SingleAsync(d => d.Id == documentId));
         Assert.Equal("renamed-by-member.txt", document.Name);
     }
 
     [Fact]
     public async Task Member_can_download()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-download-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-download-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("docs-member-download-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "docs-member-download-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-member-download-b@test.local", DocumentShare.Role.Member);
 
@@ -330,8 +341,8 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task Rename_by_viewer_returns_404_and_name_unchanged()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-viewer-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-rename-viewer-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("docs-rename-viewer-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "docs-rename-viewer-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "original.txt");
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-rename-viewer-b@test.local", DocumentShare.Role.Viewer);
 
@@ -339,7 +350,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
-        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().SingleAsync(d => d.Id == documentId));
         Assert.Equal("original.txt", document.Name);
     }
 
@@ -354,7 +365,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
-        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().SingleAsync(d => d.Id == documentId));
         Assert.Equal("original.txt", document.Name);
     }
 
@@ -375,8 +386,8 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task Viewer_can_still_download_despite_no_rename_access()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-viewer-download-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-viewer-download-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("docs-viewer-download-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "docs-viewer-download-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "original.txt");
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-viewer-download-b@test.local", DocumentShare.Role.Viewer);
 
@@ -401,7 +412,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
-        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().CountAsync(s => s.DocumentId == documentId));
+        var shareCount = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().CountAsync(s => s.DocumentId == documentId));
         Assert.Equal(1, shareCount);
     }
 
@@ -430,7 +441,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
-        var stillExists = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().AnyAsync(s => s.Id == shareId));
+        var stillExists = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().AnyAsync(s => s.Id == shareId));
         Assert.True(stillExists);
     }
 
@@ -444,7 +455,7 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         var documentId = await TestApiHelpers.CreateDocumentAsync(client, "tenant-doc.txt");
 
-        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().SingleAsync(d => d.Id == documentId));
         Assert.Equal(expectedTenantId, document.TenantId);
     }
 
@@ -469,7 +480,7 @@ public class DocumentsControllerTests : IntegrationTestBase
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         var documentId = json.GetProperty("documentId").GetGuid();
 
-        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().SingleAsync(d => d.Id == documentId));
         Assert.Equal(expectedTenantId, document.TenantId);
         Assert.NotEqual(craftedTenantId, document.TenantId);
     }
@@ -483,8 +494,8 @@ public class DocumentsControllerTests : IntegrationTestBase
 
         var shareId = await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-share-tenant-b@test.local", DocumentShare.Role.Viewer);
 
-        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().SingleAsync(d => d.Id == documentId));
-        var share = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().SingleAsync(s => s.Id == shareId));
+        var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().SingleAsync(d => d.Id == documentId));
+        var share = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().SingleAsync(s => s.Id == shareId));
 
         // The recipient (client B) is a different tenant than the document's
         // owner (client A) — every AuthenticatedClientAsync call registers a
