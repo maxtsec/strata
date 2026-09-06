@@ -4,9 +4,12 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Strata.Application.Tenancy;
 using Strata.Domain.Documents;
+using Strata.Infrastructure.Identity;
 
 namespace Strata.Api.IntegrationTests;
 
@@ -41,6 +44,35 @@ public static class TestApiHelpers
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
         var tenantId = jwt.Claims.First(c => c.Type == TenantClaimTypes.TenantId).Value;
         return Guid.Parse(tenantId);
+    }
+
+    // A second user genuinely inside an already-established tenant, unlike
+    // AuthenticatedClientAsync — every /api/auth/register call mints a brand
+    // new Tenant, so it can never produce two same-tenant users. Seeds the
+    // user directly via UserManager and hand-crafts its token, bypassing
+    // registration entirely.
+    public static async Task<HttpClient> AuthenticatedSameTenantClientAsync(
+        StrataWebApplicationFactory factory, Guid tenantId, string email, string password = "P@ssw0rd123!")
+    {
+        using var scope = factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+
+        var user = new ApplicationUser { Email = email, UserName = email, TenantId = tenantId };
+        var result = await userManager.CreateAsync(user, password);
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException(string.Join(", ", result.Errors.Select(e => e.Description)));
+        }
+
+        var token = CreateToken(
+        [
+            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new Claim(TenantClaimTypes.TenantId, tenantId.ToString())
+        ]);
+
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return client;
     }
 
     // Hand-crafts a token signed with the test host's own signing key, so it

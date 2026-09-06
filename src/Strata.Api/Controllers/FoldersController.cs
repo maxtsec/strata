@@ -80,7 +80,7 @@ public class FoldersController : ControllerBase
             return Unauthorized();
         }
 
-        var folder = await _dbContext.Folders.FindAsync(new object[] { id }, cancellationToken);
+        var folder = await _dbContext.Folders.SingleOrDefaultAsync(f => f.Id == id, cancellationToken);
         if (folder is null)
         {
             return NotFound();
@@ -150,7 +150,7 @@ public class FoldersController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        var folder = await _dbContext.Folders.FindAsync(new object[] { id }, cancellationToken);
+        var folder = await _dbContext.Folders.SingleOrDefaultAsync(f => f.Id == id, cancellationToken);
         if (folder is null)
         {
             return NotFound();
@@ -198,7 +198,7 @@ public class FoldersController : ControllerBase
 
     private async Task<bool> IsOwnedByCurrentUser(Guid folderId, CancellationToken cancellationToken)
     {
-        var folder = await _dbContext.Folders.FindAsync(new object[] { folderId }, cancellationToken);
+        var folder = await _dbContext.Folders.SingleOrDefaultAsync(f => f.Id == folderId, cancellationToken);
         if (folder is null)
         {
             return false;
