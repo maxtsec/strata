@@ -30,41 +30,48 @@ public class TenantReadIsolationTests : IntegrationTestBase
         return (client, TestApiHelpers.UserIdFromToken(token), TestApiHelpers.TenantIdFromToken(token));
     }
 
-    private Task<int> SeedAdversarialFolderAsync(Guid folderId, Guid ownerId, Guid foreignTenantId, string name) =>
-        Fixture.QueryDbAsync(db =>
-        {
-            db.Folders.Add(new Folder { Id = folderId, OwnerId = ownerId, TenantId = foreignTenantId, Name = name });
-            return db.SaveChangesAsync(CancellationToken.None);
-        });
+    // Seeds as the foreign tenant itself (not via QueryDbAsync, whose
+    // DbContext has no HttpContext and — now that write validation fails
+    // closed instead of skipping when no tenant is available — would be
+    // refused). Acting as the row's own labelled tenant produces the exact
+    // same adversarial shape (OwnerId from a different tenant's user): the
+    // interceptor only checks TenantId against the acting tenant, never
+    // OwnerId — that consistency check is separate, still-pending work.
+    private async Task<int> SeedAdversarialFolderAsync(Guid folderId, Guid ownerId, Guid foreignTenantId, string name)
+    {
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(foreignTenantId));
+        db.Folders.Add(new Folder { Id = folderId, OwnerId = ownerId, TenantId = foreignTenantId, Name = name });
+        return await db.SaveChangesAsync(CancellationToken.None);
+    }
 
-    private Task<int> SeedAdversarialDocumentAsync(Guid documentId, Guid ownerId, Guid foreignTenantId, string name) =>
-        Fixture.QueryDbAsync(db =>
+    private async Task<int> SeedAdversarialDocumentAsync(Guid documentId, Guid ownerId, Guid foreignTenantId, string name)
+    {
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(foreignTenantId));
+        db.Documents.Add(new Document
         {
-            db.Documents.Add(new Document
-            {
-                Id = documentId,
-                OwnerId = ownerId,
-                TenantId = foreignTenantId,
-                Name = name,
-                ContentType = "text/plain",
-                Size = 1L
-            });
-            return db.SaveChangesAsync(CancellationToken.None);
+            Id = documentId,
+            OwnerId = ownerId,
+            TenantId = foreignTenantId,
+            Name = name,
+            ContentType = "text/plain",
+            Size = 1L
         });
+        return await db.SaveChangesAsync(CancellationToken.None);
+    }
 
-    private Task<int> SeedAdversarialShareAsync(Guid shareId, Guid documentId, Guid userId, Guid foreignTenantId) =>
-        Fixture.QueryDbAsync(db =>
+    private async Task<int> SeedAdversarialShareAsync(Guid shareId, Guid documentId, Guid userId, Guid foreignTenantId)
+    {
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(foreignTenantId));
+        db.DocumentShares.Add(new DocumentShare
         {
-            db.DocumentShares.Add(new DocumentShare
-            {
-                Id = shareId,
-                DocumentId = documentId,
-                UserId = userId,
-                TenantId = foreignTenantId,
-                UserRole = DocumentShare.Role.Viewer
-            });
-            return db.SaveChangesAsync(CancellationToken.None);
+            Id = shareId,
+            DocumentId = documentId,
+            UserId = userId,
+            TenantId = foreignTenantId,
+            UserRole = DocumentShare.Role.Viewer
         });
+        return await db.SaveChangesAsync(CancellationToken.None);
+    }
 
     [Fact]
     public async Task List_folders_excludes_adversarial_row_owned_by_current_user()
