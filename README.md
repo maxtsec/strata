@@ -40,7 +40,7 @@ increment rather than a pile of untested code.
 - [x] Migration rehearsed against a disposable SQL Server database, including its fail-closed behavior, before being applied anywhere real
 - [x] Resource `TenantId` migration applied and verified against Azure SQL
 - [x] EF Core global query filters on `Folder`, `Document`, and `DocumentShare` for read isolation, backed by adversarial integration tests (a resource owned by the current user but labelled with a foreign tenant is still unreachable)
-- [x] A `SaveChangesInterceptor` validating every `Added`/`Deleted` tenant-owned entity against the current tenant — closes the gap query filters leave on writes, including an entity attached directly for deletion without ever being queried
+- [x] A `SaveChangesInterceptor` validating every `Added`/`Modified`/`Deleted` tenant-owned entity — an existing row's actual tenant is re-verified against the database itself (never the in-memory entity's own claimed value), and a tenant-owned write with no trusted tenant available fails closed rather than being treated as an implicit admin bypass. Closes the gap query filters leave on writes, including an entity attached directly for deletion or update without ever being queried
 - [ ] Same-tenant relationship enforcement, especially document sharing
 - [ ] A complete adversarial two-tenant integration-test matrix in CI
 - [ ] Tenant-isolation ADR finalized once the enforcement design above is in place

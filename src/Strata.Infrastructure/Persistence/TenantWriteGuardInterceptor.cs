@@ -106,10 +106,12 @@ public class TenantWriteGuardInterceptor : SaveChangesInterceptor
         }
     }
 
-    // Null means the row is invisible under this tenant's own query filter
-    // (or genuinely gone) — refused either way, without confirming which,
-    // for the same anti-enumeration reason the controllers already collapse
-    // "missing" and "foreign" into one response.
+    // GetDatabaseValues ignores query filters — it exists precisely to
+    // report the row's true current state regardless, the same way
+    // optimistic concurrency conflict resolution needs the real values, not
+    // a filtered view of them. So a foreign-tenant row still comes back here
+    // with its real TenantId; CheckMatches below is what actually rejects
+    // it. Null only means the row genuinely doesn't exist at all.
     private static Guid ActualTenantIdInDatabase(PropertyValues? databaseValues)
     {
         if (databaseValues is null)
