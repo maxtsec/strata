@@ -78,6 +78,26 @@ public class HttpContextCurrentTenantTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public void IsAvailable_is_false_when_there_is_no_http_context_at_all()
+    {
+        var accessor = new HttpContextAccessor { HttpContext = null };
+        var currentTenant = new HttpContextCurrentTenant(accessor);
+
+        Assert.False(currentTenant.IsAvailable);
+    }
+
+    [Fact]
+    public void IsAvailable_is_true_even_when_the_claim_inside_is_invalid()
+    {
+        // A real request always has an HttpContext, valid claim or not —
+        // IsAvailable answers "is there a request", not "is the claim ok".
+        var accessor = AccessorWithClaims();
+        var currentTenant = new HttpContextCurrentTenant(accessor);
+
+        Assert.True(currentTenant.IsAvailable);
+    }
+
     private static IHttpContextAccessor AccessorWithClaims(params Claim[] claims)
     {
         var identity = new ClaimsIdentity(claims, authenticationType: "TestAuth");

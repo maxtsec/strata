@@ -19,8 +19,12 @@ builder.Services.AddControllers();
 builder.Services.AddHealthChecks();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+builder.Services.AddScoped<TenantWriteGuardInterceptor>();
+builder.Services.AddDbContext<AppDbContext>((sp, options) =>
+{
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+    options.AddInterceptors(sp.GetRequiredService<TenantWriteGuardInterceptor>());
+});
 builder.Services.AddScoped<IApplicationDbContext>(sp =>
     sp.GetRequiredService<AppDbContext>());
 builder.Services.AddIdentityCore<ApplicationUser>()
