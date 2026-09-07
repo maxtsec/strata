@@ -70,10 +70,10 @@ public class IntegrationTestFixture : IAsyncLifetime
 
     // Bypasses DI/HttpContext entirely: builds an AppDbContext wired to a
     // caller-supplied ICurrentTenant, with the real TenantWriteGuardInterceptor
-    // attached. QueryDbAsync can't exercise the interceptor's throw path
-    // (its DbContext has no HttpContext, so IsAvailable is false and
-    // validation is skipped by design) — this is how a test pretends to be a
-    // specific tenant's request instead.
+    // attached. QueryDbAsync's DbContext has no HttpContext, so IsAvailable
+    // is false there — any tenant-owned write through it now unconditionally
+    // fails closed with "no trusted tenant", which can't simulate a specific
+    // tenant's write at all. This is how a test acts as one instead.
     public AppDbContext CreateDbContext(ICurrentTenant currentTenant)
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
