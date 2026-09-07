@@ -11,6 +11,8 @@ public class HttpContextCurrentTenant : ICurrentTenant
         _httpContextAccessor = httpContextAccessor;
     }
 
+    public bool IsAvailable => _httpContextAccessor.HttpContext is not null;
+
     // Resolved lazily, on access, rather than in the constructor: AppDbContext
     // now takes an ICurrentTenant too, and it must be constructible outside an
     // HTTP request (migrations, test setup) without a valid tenant to resolve.

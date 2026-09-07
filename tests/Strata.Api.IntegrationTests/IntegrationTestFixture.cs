@@ -2,6 +2,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Respawn;
+using Strata.Application.Tenancy;
 using Strata.Infrastructure.Persistence;
 
 namespace Strata.Api.IntegrationTests;
@@ -20,10 +21,12 @@ public class IntegrationTestFixture : IAsyncLifetime
     public StrataWebApplicationFactory Factory { get; private set; } = null!;
 
     private Respawner _respawner = null!;
+    private string _connectionString = null!;
 
     public async Task InitializeAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable("STRATA_TEST_CONNECTION_STRING") ?? ConnectionString;
+        _connectionString = connectionString;
         Factory = new StrataWebApplicationFactory(connectionString);
 
         // Touching Services starts the host, which is enough to force it to
@@ -63,6 +66,21 @@ public class IntegrationTestFixture : IAsyncLifetime
         using var scope = Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         return await query(db);
+    }
+
+    // Bypasses DI/HttpContext entirely: builds an AppDbContext wired to a
+    // caller-supplied ICurrentTenant, with the real TenantWriteGuardInterceptor
+    // attached. QueryDbAsync can't exercise the interceptor's throw path
+    // (its DbContext has no HttpContext, so IsAvailable is false and
+    // validation is skipped by design) — this is how a test pretends to be a
+    // specific tenant's request instead.
+    public AppDbContext CreateDbContext(ICurrentTenant currentTenant)
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(_connectionString)
+            .AddInterceptors(new TenantWriteGuardInterceptor(currentTenant))
+            .Options;
+        return new AppDbContext(options, currentTenant);
     }
 
     public async Task DisposeAsync()
