@@ -80,6 +80,16 @@ The dependency direction itself is enforced by `tests/Strata.Architecture.Tests`
 not just documented here. Architecture decisions are recorded as they're made
 in `docs/adr/`.
 
+## Documentation
+
+| | English | 中文 |
+|---|---|---|
+| **Design** — the tenancy model, the four-layer isolation design, and what each layer deliberately does *not* cover | [design.md](docs/design.md) | [design.zh.md](docs/design.zh.md) |
+| **Technical** — schema, migrations, DI wiring, key mechanisms, API surface, testing, local setup, Azure deployment | [technical.md](docs/technical.md) | [technical.zh.md](docs/technical.zh.md) |
+
+Individual decisions, with their alternatives and costs, live in
+[`docs/adr/`](docs/adr/).
+
 ## Roadmap
 
 0. **Walking skeleton** — empty API, deployed, CI/CD green *(complete)*
