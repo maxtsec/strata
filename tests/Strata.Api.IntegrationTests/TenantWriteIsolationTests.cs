@@ -200,4 +200,158 @@ public class TenantWriteIsolationTests : IntegrationTestBase
             d.Folders.AsNoTracking().IgnoreQueryFilters().AnyAsync(f => f.Id == folderId));
         Assert.False(exists);
     }
+
+    [Fact]
+    public async Task Database_rejects_share_to_recipient_in_another_tenant()
+    {
+        var (clientA, _, tenantAId) = await RegisterAsync("write-share-recipient-a@test.local");
+        var (_, userBId, _) = await RegisterAsync("write-share-recipient-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "share-recipient.txt");
+        var shareId = Guid.NewGuid();
+
+        // TenantWriteGuardInterceptor accepts the share's TenantId, but the
+        // composite user/tenant foreign key must reject the mismatched user.
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(tenantAId));
+        db.DocumentShares.Add(new DocumentShare
+        {
+            Id = shareId,
+            DocumentId = documentId,
+            UserId = userBId,
+            TenantId = tenantAId,
+            UserRole = DocumentShare.Role.Viewer
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+
+        var exists = await Fixture.QueryDbAsync(d =>
+            d.DocumentShares.IgnoreQueryFilters().AnyAsync(s => s.Id == shareId));
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Database_rejects_share_to_document_in_another_tenant()
+    {
+        var (clientA, userAId, tenantAId) = await RegisterAsync("write-share-document-a@test.local");
+        var (clientB, _, _) = await RegisterAsync("write-share-document-b@test.local");
+        var foreignDocumentId = await TestApiHelpers.CreateDocumentAsync(clientB, "share-document.txt");
+        var shareId = Guid.NewGuid();
+
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(tenantAId));
+        db.DocumentShares.Add(new DocumentShare
+        {
+            Id = shareId,
+            DocumentId = foreignDocumentId,
+            UserId = userAId,
+            TenantId = tenantAId,
+            UserRole = DocumentShare.Role.Viewer
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+
+        var exists = await Fixture.QueryDbAsync(d =>
+            d.DocumentShares.IgnoreQueryFilters().AnyAsync(s => s.Id == shareId));
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Database_rejects_folder_owned_by_a_user_in_another_tenant()
+    {
+        var (_, _, tenantAId) = await RegisterAsync("write-folder-owner-a@test.local");
+        var (_, userBId, _) = await RegisterAsync("write-folder-owner-b@test.local");
+        var folderId = Guid.NewGuid();
+
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(tenantAId));
+        db.Folders.Add(new Folder
+        {
+            Id = folderId,
+            OwnerId = userBId,
+            TenantId = tenantAId,
+            Name = "cross-tenant owner"
+        });
+
+        // The write interceptor sees tenant A as expected. SQL Server must
+        // reject the owner/tenant pair because the owner belongs to B.
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+
+        var exists = await Fixture.QueryDbAsync(d =>
+            d.Folders.IgnoreQueryFilters().AnyAsync(folder => folder.Id == folderId));
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Database_rejects_folder_parent_in_another_tenant()
+    {
+        var (clientA, userAId, tenantAId) = await RegisterAsync("write-folder-parent-a@test.local");
+        var (clientB, _, _) = await RegisterAsync("write-folder-parent-b@test.local");
+        var foreignParentId = await TestApiHelpers.CreateFolderAsync(clientB, "B's parent");
+        var folderId = Guid.NewGuid();
+
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(tenantAId));
+        db.Folders.Add(new Folder
+        {
+            Id = folderId,
+            OwnerId = userAId,
+            TenantId = tenantAId,
+            ParentFolderId = foreignParentId,
+            Name = "cross-tenant child"
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+
+        var exists = await Fixture.QueryDbAsync(d =>
+            d.Folders.IgnoreQueryFilters().AnyAsync(folder => folder.Id == folderId));
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Database_rejects_document_owned_by_a_user_in_another_tenant()
+    {
+        var (_, _, tenantAId) = await RegisterAsync("write-document-owner-a@test.local");
+        var (_, userBId, _) = await RegisterAsync("write-document-owner-b@test.local");
+        var documentId = Guid.NewGuid();
+
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(tenantAId));
+        db.Documents.Add(new Document
+        {
+            Id = documentId,
+            OwnerId = userBId,
+            TenantId = tenantAId,
+            Name = "cross-tenant-owner.txt",
+            ContentType = "text/plain",
+            Size = 1
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+
+        var exists = await Fixture.QueryDbAsync(d =>
+            d.Documents.IgnoreQueryFilters().AnyAsync(document => document.Id == documentId));
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Database_rejects_document_folder_in_another_tenant()
+    {
+        var (_, userAId, tenantAId) = await RegisterAsync("write-document-folder-a@test.local");
+        var (clientB, _, _) = await RegisterAsync("write-document-folder-b@test.local");
+        var foreignFolderId = await TestApiHelpers.CreateFolderAsync(clientB, "B's folder");
+        var documentId = Guid.NewGuid();
+
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(tenantAId));
+        db.Documents.Add(new Document
+        {
+            Id = documentId,
+            OwnerId = userAId,
+            TenantId = tenantAId,
+            FolderId = foreignFolderId,
+            Name = "cross-tenant-folder.txt",
+            ContentType = "text/plain",
+            Size = 1
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+
+        var exists = await Fixture.QueryDbAsync(d =>
+            d.Documents.IgnoreQueryFilters().AnyAsync(document => document.Id == documentId));
+        Assert.False(exists);
+    }
 }
