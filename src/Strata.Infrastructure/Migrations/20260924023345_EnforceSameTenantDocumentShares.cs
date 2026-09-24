@@ -15,6 +15,8 @@ namespace Strata.Infrastructure.Migrations
             // schema migration: stop with an actionable error so they can be
             // reviewed before this constraint is applied.
             migrationBuilder.Sql(@"
+                SET XACT_ABORT ON;
+
                 IF EXISTS (
                     SELECT 1
                     FROM [DocumentShares] AS [share]
@@ -26,7 +28,7 @@ namespace Strata.Infrastructure.Migrations
                        OR [share].[TenantId] <> [recipient].[TenantId]
                 )
                 BEGIN
-                    RAISERROR('EnforceSameTenantDocumentShares migration failed: existing shares cross tenant boundaries. Review and remove or correct those rows before retrying.', 16, 1);
+                    ;THROW 51000, 'EnforceSameTenantDocumentShares migration failed: existing shares cross tenant boundaries. Review and remove or correct those rows before retrying.', 1;
                 END
             ");
 

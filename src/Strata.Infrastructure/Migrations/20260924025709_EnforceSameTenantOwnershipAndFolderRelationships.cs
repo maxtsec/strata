@@ -15,6 +15,8 @@ namespace Strata.Infrastructure.Migrations
             // deployment fails with an actionable message instead of deleting
             // or rewriting inconsistent data.
             migrationBuilder.Sql(@"
+                SET XACT_ABORT ON;
+
                 IF EXISTS (
                     SELECT 1
                     FROM [Folders] AS [folder]
@@ -23,7 +25,7 @@ namespace Strata.Infrastructure.Migrations
                     WHERE [folder].[TenantId] <> [owner].[TenantId]
                 )
                 BEGIN
-                    RAISERROR('EnforceSameTenantOwnershipAndFolderRelationships migration failed: a folder owner belongs to another tenant.', 16, 1);
+                    ;THROW 51000, 'EnforceSameTenantOwnershipAndFolderRelationships migration failed: a folder owner belongs to another tenant.', 1;
                 END
             ");
 
@@ -36,7 +38,7 @@ namespace Strata.Infrastructure.Migrations
                     WHERE [child].[TenantId] <> [parent].[TenantId]
                 )
                 BEGIN
-                    RAISERROR('EnforceSameTenantOwnershipAndFolderRelationships migration failed: a folder parent belongs to another tenant.', 16, 1);
+                    ;THROW 51000, 'EnforceSameTenantOwnershipAndFolderRelationships migration failed: a folder parent belongs to another tenant.', 1;
                 END
             ");
 
@@ -49,7 +51,7 @@ namespace Strata.Infrastructure.Migrations
                     WHERE [document].[TenantId] <> [owner].[TenantId]
                 )
                 BEGIN
-                    RAISERROR('EnforceSameTenantOwnershipAndFolderRelationships migration failed: a document owner belongs to another tenant.', 16, 1);
+                    ;THROW 51000, 'EnforceSameTenantOwnershipAndFolderRelationships migration failed: a document owner belongs to another tenant.', 1;
                 END
             ");
 
@@ -62,7 +64,7 @@ namespace Strata.Infrastructure.Migrations
                     WHERE [document].[TenantId] <> [folder].[TenantId]
                 )
                 BEGIN
-                    RAISERROR('EnforceSameTenantOwnershipAndFolderRelationships migration failed: a document folder belongs to another tenant.', 16, 1);
+                    ;THROW 51000, 'EnforceSameTenantOwnershipAndFolderRelationships migration failed: a document folder belongs to another tenant.', 1;
                 END
             ");
 
