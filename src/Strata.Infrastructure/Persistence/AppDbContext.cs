@@ -34,10 +34,12 @@ public class AppDbContext : IdentityDbContext<ApplicationUser, IdentityRole<Guid
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
         // Read-side tenant isolation. `Tenant` and `ApplicationUser` are
-        // deliberately not filtered here — authentication has to be able to
-        // look a user up before a tenant is even established, and same-tenant
-        // recipient validation is separate, later work. Each filter closes
-        // over `_currentTenant` (not a plain field), so EF Core re-evaluates
+        // deliberately not filtered here — authentication must resolve users
+        // before a tenant is established, and sharing looks recipients up by
+        // email.
+        // Composite foreign keys independently enforce same-tenant owners,
+        // folders, documents, and shares. Each filter closes over
+        // `_currentTenant` (not a plain field), so EF Core re-evaluates
         // it against the live DbContext instance on every query, not once at
         // model-build time.
         builder.Entity<Folder>().HasQueryFilter(f => f.TenantId == _currentTenant.TenantId);

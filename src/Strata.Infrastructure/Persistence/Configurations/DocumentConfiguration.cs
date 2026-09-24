@@ -11,14 +11,20 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
 {
     public void Configure(EntityTypeBuilder<Document> builder)
     {
+        // DocumentShare references documents by (Id, TenantId), which makes
+        // the share's tenant agree with the document's tenant in the database.
+        builder.HasAlternateKey(document => new { document.Id, document.TenantId });
+
         builder.HasOne<ApplicationUser>()
             .WithMany()
-            .HasForeignKey(d => d.OwnerId)
+            .HasForeignKey(d => new { d.OwnerId, d.TenantId })
+            .HasPrincipalKey(user => new { user.Id, user.TenantId })
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne<Folder>()
             .WithMany()
-            .HasForeignKey(d => d.FolderId)
+            .HasForeignKey(d => new { d.FolderId, d.TenantId })
+            .HasPrincipalKey(folder => new { folder.Id, folder.TenantId })
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne<Tenant>()

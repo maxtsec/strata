@@ -8,11 +8,9 @@ Strata is multi-tenant at the application layer, not the infrastructure
 layer: every tenant's data lives in the same Azure SQL database, in the
 same tables, distinguished by a `TenantId` column on every tenant-owned
 row. There is one `Tenants` table (`Id`, `Name`, `CreatedAt`) recording
-which tenants exist. Each `ApplicationUser` will belong to exactly one
-`Tenant`. This ADR records the strategy; the `TenantId` columns themselves,
-tenant resolution, and the enforcement mechanisms below are deliberately
-out of scope for the PR that introduces this ADR (see "Planned defence in
-depth").
+which tenants exist. Each `ApplicationUser` belongs to exactly one
+`Tenant`. This ADR records the strategy; the current enforcement status is
+described below.
 
 ## Alternatives considered
 
@@ -79,18 +77,18 @@ differently:
   Tenant A's rows could still set `TenantId` to Tenant B on every row it
   touches, and nothing described in this ADR would catch that.
 
-Project policy, effective now even though nothing enforces it yet:
+Project policy:
 **`IgnoreQueryFilters`, `ExecuteUpdate`, `ExecuteDelete`, and raw SQL must
 not be used on tenant-owned data unless they receive a separate
 tenant-isolation design review, explicit enforcement, and adversarial
 integration tests.** `IgnoreQueryFilters` belongs on that list for the same
 reason as the other two: a global query filter is a default a query
 participates in, not a boundary it's kept inside of, and a single
-documented call switches it off for any query that makes it. No command
-interceptor, wrapper abstraction, or database-level Row-Level Security is
-introduced in this PR to cover that gap — the policy above is the
-containment for now, and closing it properly is later work, not something
-to improvise on the day someone reaches for one of these.
+documented call switches it off for any query that makes it. The current
+`SaveChanges` interceptor does not see bulk writes, and no command
+interceptor or database-level Row-Level Security is configured to cover
+that gap — the policy above remains the containment until each path gets
+its own enforcement design and adversarial tests.
 
 A schema change (a new column, a new table) is felt by every tenant at
 once — there is no way to roll a migration out to one tenant first, unlike
@@ -98,45 +96,51 @@ a database-per-tenant deployment where a bad migration is contained to
 whoever it was applied to. Heavy read/write activity from one tenant
 shares the same database compute and I/O as every other tenant (the
 noisy-neighbour problem) with no isolation between them beyond whatever
-Azure SQL's own resource governance provides. And critically: none of the
-mechanisms below are enforced for operational or privileged database
-access — a raw query run through SSMS, a support script connecting
-directly with the SQL admin credential, or a future background job that
-doesn't go through `AppDbContext`'s configured filters bypasses all of it.
-Query filters and interceptors protect the application's own query
-surface; they are not a database-level access control.
+Azure SQL's own resource governance provides. And critically: query filters
+and interceptors do not enforce tenant-scoped reads for operational or
+privileged database access — a raw query run through SSMS or a support script
+with the SQL admin credential can read across tenants. Composite foreign keys
+protect declared ownership, folder, document, and share relationships on
+writes, including direct SQL writes, but they are not database-level read
+access control.
 
-## Planned defence in depth (not yet implemented)
+## Enforcement status
 
-None of the following exist yet — they are the subject of later PRs in
-this phase, listed here so the plan is visible before it's built:
+The current application enforces tenancy through several independent
+mechanisms:
 
-- **Trusted tenant resolution.** The active `TenantId` for a request will
-  come from a claim in a validated, signed JWT, exposed through a
-  request-scoped tenant context — never accepted from a request body or
-  query string.
-- **EF Core global query filters** on every tenant-owned entity, scoping
+- **Trusted tenant resolution.** The active `TenantId` for a request comes
+  from a claim in a validated, signed JWT, exposed through a request-scoped
+  tenant context — never accepted from a request body or query string.
+- **EF Core global query filters** on tenant-owned entities, scoping
   EF LINQ query paths by default — ordinary reads, and the source-row
   selection of any `ExecuteUpdate`/`ExecuteDelete` — to the current
-  request's tenant. "By default" is doing real work in that sentence: any
-  query can opt out with `.IgnoreQueryFilters()`, a documented, one-line
-  EF Core call, which is why the policy below now covers it explicitly
-  rather than treating the filter as a hard boundary. It also does not
-  validate values a bulk statement assigns (see Costs and risks); it only
-  narrows which rows a query can touch, and only when nothing has
-  disabled it.
-- **A `SaveChanges` interceptor**, protecting only change-tracked writes
-  that pass through `SaveChangesAsync` — every `Added`, `Modified`, and
-  `Deleted` entity gets a second, independent check at the point it's
-  actually persisted. It has no visibility into `ExecuteUpdate`,
-  `ExecuteDelete`, or raw SQL, which is why those remain governed by
-  policy rather than code until they get their own design work.
-- **Adversarial two-tenant integration tests**, run in CI, that create two
-  tenants and actively try to make one reach the other's data — by id, by
-  crafted request, by any path that can be thought of. Following this
-  project's own principle: a mechanism nobody has tried to break is worse
-  than no mechanism, because it invites trust it hasn't earned.
+  request's tenant. Any query can opt out with `.IgnoreQueryFilters()`, so
+  these filters are a default rather than a hard boundary. They also do not
+  validate values a bulk statement assigns (see Costs and risks).
+- **A `SaveChanges` interceptor** checks every `Added`, `Modified`, and
+  `Deleted` tenant-owned entity before persistence. Existing rows are
+  checked against their database values, so a detached entity cannot forge
+  its tenant to pass validation.
+- **Same-tenant document sharing.** The API rejects a recipient from another
+  tenant using the same response as an unknown email. Composite foreign keys
+  require `(DocumentId, TenantId)` to reference the same tenant's document
+  and `(UserId, TenantId)` to reference a user in that tenant. The migration
+  fails closed if existing cross-tenant shares are found; it does not delete
+  or rewrite them.
+- **Same-tenant ownership and folder/document relationships.** Composite
+  foreign keys require each folder and document owner to belong to the
+  resource's tenant, each parent folder to belong to the child folder's
+  tenant, and each document folder to belong to the document's tenant. The
+  migration checks existing rows first and fails closed without changing
+  inconsistent data.
+- **Adversarial two-tenant integration tests** exercise tenant filters,
+  cross-tenant API access, and direct database writes that attempt to create
+  mismatched share, owner, folder, or document relationships. The GitHub
+  Actions workflow runs the full integration test project on pull requests.
 
-The PR that introduces this ADR adds only the `Tenants` table itself.
-Nothing reads or writes through a tenant lens yet, and no existing
-behaviour changes.
+Tenant isolation for declared relationships and application query paths is
+now enforced and covered by integration tests. This shared-schema design
+still does not provide database-level read access control: privileged SQL
+access can read every tenant, and bulk writes or queries that bypass tenant
+filters remain governed by the project policy above.

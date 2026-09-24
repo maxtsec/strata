@@ -175,8 +175,8 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task Create_duplicate_share_returns_409()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-duplicate-a@test.local");
-        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-duplicate-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("shares-duplicate-a@test.local");
+        await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "shares-duplicate-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
 
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "shares-duplicate-b@test.local", DocumentShare.Role.Viewer);
@@ -220,8 +220,8 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task List_shares_by_recipient_returns_404()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-list-recipient-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-list-recipient-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("shares-list-recipient-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "shares-list-recipient-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "shares-list-recipient-b@test.local", DocumentShare.Role.Viewer);
 
@@ -235,8 +235,8 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task List_shares_returns_created_shares()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-list-a@test.local");
-        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-list-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("shares-list-a@test.local");
+        await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "shares-list-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "shares-list-b@test.local", DocumentShare.Role.Viewer);
 
@@ -250,9 +250,9 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task Delete_share_on_foreign_document_returns_404()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-delete-foreign-a@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("shares-delete-foreign-a@test.local");
         var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-delete-foreign-b@test.local");
-        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-delete-foreign-c@test.local");
+        await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "shares-delete-foreign-c@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
         var shareId = await TestApiHelpers.CreateShareAsync(clientA, documentId, "shares-delete-foreign-c@test.local", DocumentShare.Role.Viewer);
 
@@ -278,8 +278,8 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task Delete_share_revokes_recipient_download_access()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-revoke-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "shares-revoke-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("shares-revoke-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "shares-revoke-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
         var shareId = await TestApiHelpers.CreateShareAsync(clientA, documentId, "shares-revoke-b@test.local", DocumentShare.Role.Viewer);
 
@@ -401,9 +401,9 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task Member_cannot_create_shares()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-createshare-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-createshare-b@test.local");
-        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-createshare-c@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("docs-member-createshare-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "docs-member-createshare-b@test.local");
+        await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "docs-member-createshare-c@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-member-createshare-b@test.local", DocumentShare.Role.Member);
 
@@ -419,8 +419,8 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task Member_cannot_list_shares()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-listshare-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-listshare-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("docs-member-listshare-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "docs-member-listshare-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
         await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-member-listshare-b@test.local", DocumentShare.Role.Member);
 
@@ -432,8 +432,8 @@ public class DocumentsControllerTests : IntegrationTestBase
     [Fact]
     public async Task Member_cannot_delete_shares()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-deleteshare-a@test.local");
-        var clientB = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-member-deleteshare-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("docs-member-deleteshare-a@test.local");
+        var clientB = await TestApiHelpers.AuthenticatedSameTenantClientAsync(Fixture.Factory, tenantId, "docs-member-deleteshare-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "doc.txt");
         var shareId = await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-member-deleteshare-b@test.local", DocumentShare.Role.Member);
 
@@ -486,21 +486,41 @@ public class DocumentsControllerTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task Create_share_stores_documents_tenant_id_not_recipients()
+    public async Task Create_share_requires_recipient_in_documents_tenant()
     {
-        var clientA = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-share-tenant-a@test.local");
-        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-share-tenant-b@test.local");
+        var (clientA, tenantId) = await AuthenticatedOwnerAsync("docs-share-tenant-a@test.local");
+        await TestApiHelpers.AuthenticatedSameTenantClientAsync(
+            Fixture.Factory, tenantId, "docs-share-tenant-b@test.local");
         var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "shared-doc.txt");
 
         var shareId = await TestApiHelpers.CreateShareAsync(clientA, documentId, "docs-share-tenant-b@test.local", DocumentShare.Role.Viewer);
 
         var document = await Fixture.QueryDbAsync(db => db.Documents.AsNoTracking().IgnoreQueryFilters().SingleAsync(d => d.Id == documentId));
         var share = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking().IgnoreQueryFilters().SingleAsync(s => s.Id == shareId));
+        var recipient = await Fixture.QueryDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Email == "docs-share-tenant-b@test.local"));
 
-        // The recipient (client B) is a different tenant than the document's
-        // owner (client A) — every AuthenticatedClientAsync call registers a
-        // brand-new tenant. The share must still carry the document's
-        // tenant, not the recipient's.
         Assert.Equal(document.TenantId, share.TenantId);
+        Assert.Equal(recipient.TenantId, share.TenantId);
+    }
+
+    [Fact]
+    public async Task Create_share_rejects_cross_tenant_recipient_without_disclosing_account()
+    {
+        var (clientA, _) = await AuthenticatedOwnerAsync("docs-share-foreign-a@test.local");
+        await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-share-foreign-b@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientA, "shared-doc.txt");
+
+        var response = await clientA.PostAsJsonAsync($"/api/documents/{documentId}/shares",
+            new { Email = "docs-share-foreign-b@test.local", Role = DocumentShare.Role.Viewer });
+        var unknownRecipientResponse = await clientA.PostAsJsonAsync($"/api/documents/{documentId}/shares",
+            new { Email = "docs-share-unknown@test.local", Role = DocumentShare.Role.Viewer });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(unknownRecipientResponse.StatusCode, response.StatusCode);
+        Assert.Equal(await unknownRecipientResponse.Content.ReadAsStringAsync(), await response.Content.ReadAsStringAsync());
+
+        var shareExists = await Fixture.QueryDbAsync(db => db.DocumentShares.AsNoTracking()
+            .IgnoreQueryFilters().AnyAsync(s => s.DocumentId == documentId));
+        Assert.False(shareExists);
     }
 }

@@ -39,19 +39,19 @@ increment rather than a pile of untested code.
 - [x] New create paths assign tenant identity server-side rather than accepting it from the client
 - [x] Migration rehearsed against a disposable SQL Server database, including its fail-closed behavior, before being applied anywhere real
 - [x] Resource `TenantId` migration applied and verified against Azure SQL
-- [x] EF Core global query filters on `Folder`, `Document`, and `DocumentShare` for read isolation, backed by adversarial integration tests (a resource owned by the current user but labelled with a foreign tenant is still unreachable)
+- [x] EF Core global query filters on `Folder`, `Document`, and `DocumentShare` for read isolation, backed by two-tenant integration tests that verify foreign rows are hidden
 - [x] A `SaveChangesInterceptor` validating every `Added`/`Modified`/`Deleted` tenant-owned entity — an existing row's actual tenant is re-verified against the database itself (never the in-memory entity's own claimed value), and a tenant-owned write with no trusted tenant available fails closed rather than being treated as an implicit admin bypass. Closes the gap query filters leave on writes, including an entity attached directly for deletion or update without ever being queried
-- [ ] Same-tenant relationship enforcement, especially document sharing
-- [ ] A complete adversarial two-tenant integration-test matrix in CI
-- [ ] Tenant-isolation ADR finalized once the enforcement design above is in place
+- [x] Document shares enforce same-tenant relationships in the API and with composite database foreign keys
+- [x] Same-tenant ownership and folder/document relationship constraints at the database boundary
+- [x] Adversarial two-tenant integration tests cover API isolation and database relationship constraints, and run in CI
+- [x] Tenant-isolation ADR finalized with the implemented relationship constraints and remaining limitations
 
 Tenant IDs are now trusted and correctly persisted, and both reads and
-writes are filtered/validated by tenant, but isolation is not complete until
-relationship validation (a share can still name a recipient in a different
-tenant) and the full adversarial test matrix are also in place. Owner
-authorization is not a substitute for tenant isolation — it happens to block
-most cross-tenant access today, and the query filter and write interceptor
-now back it up independently on both reads and writes.
+writes are filtered/validated by tenant. Composite database foreign keys
+also keep owners, folder trees, documents, and shares within one tenant.
+The integration suite checks tenant-scoped reads, API behavior, and direct
+database writes across two tenants; see [ADR 0004](docs/adr/0004-shared-database-shared-schema-tenancy.md)
+for the remaining limits of shared-schema isolation.
 
 ## Architecture
 
