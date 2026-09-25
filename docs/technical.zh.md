@@ -82,12 +82,19 @@ entity，這正是 write interceptor 也必須驗證 `Modified` 的原因（見 
 `DocumentShare → Document` 例外，採用 cascade（刪除 document 會一併移除其
 share）。
 
-| Table | Index |
-|---|---|
-| `Folders` | `TenantId` |
-| `Documents` | `TenantId` |
-| `DocumentShares` | `TenantId`；unique `(DocumentId, UserId)` |
-| `AspNetUsers` | `TenantId` |
+租戶資料之間（以及指向擁有者 user）的每條關聯都是包含 `TenantId` 的 **composite**
+foreign key，指向 principal 上的 `(Id, TenantId)` alternate key。因此無論經哪條程式
+路徑寫入，SQL Server 都會拒絕來自其他租戶的擁有者、父 folder、document 所在
+folder、share 的 document 或 share 的接收者。Nullable 的 `ParentFolderId` /
+`FolderId` 為 null 時 composite key 不作檢查，這正符合根 folder 與未歸檔 document
+的情況。原有的 `TenantId → Tenants` foreign key 仍然保留。
+
+| Table | Alternate key | Index |
+|---|---|---|
+| `Folders` | `(Id, TenantId)` | `TenantId`；`(OwnerId, TenantId)`；`(ParentFolderId, TenantId)` |
+| `Documents` | `(Id, TenantId)` | `TenantId`；`(OwnerId, TenantId)`；`(FolderId, TenantId)` |
+| `DocumentShares` | — | `TenantId`；unique `(DocumentId, UserId)`；`(DocumentId, TenantId)`；`(UserId, TenantId)` |
+| `AspNetUsers` | `(Id, TenantId)` | `TenantId` |
 
 Unique `(DocumentId, UserId)` index 才是防止重複 share 的真正保障；應用層的預先檢
 查只是最佳化。`CreateShare` 在捕捉到 `DbUpdateException` 之後會**重新驗證**，而不
@@ -104,6 +111,8 @@ Unique `(DocumentId, UserId)` index 才是防止重複 share 的真正保障；�
 | `20260905020127_AddTenant` | 只加 `Tenants` table |
 | `20260905025451_AddApplicationUserTenantId` | 必填的 `ApplicationUser.TenantId`，既有使用者回填至一個決定性的 Legacy Tenant |
 | `20260905051133_AddTenantIdToResources` | `Folders` / `Documents` / `DocumentShares` 加上必填 `TenantId` |
+| `20260924023345_EnforceSameTenantDocumentShares` | `DocumentShares` 上的 composite `(DocumentId, TenantId)` 與 `(UserId, TenantId)` foreign key |
+| `20260924025709_EnforceSameTenantOwnershipAndFolderRelationships` | `Folders` / `Documents` 上的 composite 擁有者、父 folder、document folder foreign key |
 
 ### 分階段、fail-closed 的 migration 模式
 
@@ -124,6 +133,13 @@ Unique `(DocumentId, UserId)` index 才是防止重複 share 的真正保障；�
 `AddTenantIdToResources` 曾在一個「先 migrate 到 N−1、再植入具代表性跨租戶資料」
 的拋棄式資料庫上完整綵排過，並包含一個刻意的反面測試，證明 `RAISERROR` 檢查真的
 會中止並且不留下任何部分變更。
+
+兩個 same-tenant 關聯 migration 沒有新增欄位，所以只需要驗證階段：在移除任何單欄
+foreign key 之前，先檢查既有資料有沒有跨租戶的關聯，有的話便以指明該關聯的訊息停
+止。它們用 `SET XACT_ABORT ON` 加 `THROW` 而不是 `RAISERROR`，所以無論是經
+`dotnet ef database update` 還是由產生的 SQL script 套用，migration 都會中止並
+rollback——severity 16 的 `RAISERROR` 只能擋住前者。Migration 永遠不會刪除或改寫
+不一致的資料；這些資料會留待人手 review。
 
 ## 5. Request pipeline 與 DI
 
@@ -252,13 +268,16 @@ Identity 自己的 `SaveChangesAsync`——只在它所有驗證通過之後才�
 
 每條 create path 都由 server 端從 `ICurrentTenant` 指派 `TenantId`；client 自行送
 上來的 `tenantId` 欄位完全無效（有測試覆蓋）。Share 蓋的是**它 document 的**租
-戶，絕不是接收者的。
+戶，絕不是接收者的；而 `POST /api/documents/{id}/shares` 遇到其他租戶的接收者時，
+會回傳與「email 不存在」相同的 `400 User not found.`，因此這個 endpoint 不會洩露某
+個地址是否在其他地方有帳戶。Composite foreign key（§3）在 database 層強制執行同一
+條規則。
 
 不存在與無權限的資源同樣回 404（防列舉）。
 
 ## 8. 測試
 
-共 89 條測試：2 條架構測試 + 87 條整合測試。
+共 102 條測試：7 條架構測試 + 95 條整合測試。
 
 ### 架構測試（`Strata.Architecture.Tests`）
 
@@ -266,6 +285,13 @@ NetArchTest 斷言 `Strata.Domain` 對 `Strata.Application`、
 `Strata.Infrastructure`、`Strata.Api`、EF Core、ASP.NET Core 全部沒有相依；以及
 `Strata.Application` 對 `Strata.Infrastructure` 與 `Strata.Api` 沒有相依。分層是
 被強制執行的，不只寫在文檔裡。
+
+`TenantFilterBypassTests` 強制執行 ADR 0004 對繞過 filter 的 API 的政策。它用
+Mono.Cecil 讀取每個 production assembly 的 IL（包括 async state machine 與 lambda
+closure），若有任何程式在已 review 的 allowlist（目前為空）之外呼叫
+`IgnoreQueryFilters`、`ExecuteUpdate`/`ExecuteDelete` 或 raw SQL API（`FromSql*`、
+`ExecuteSql*`、`SqlQuery*`），測試即失敗。另一條配套測試用 test assembly 內一個刻意
+的違規來檢驗掃描器本身，確保這條規則不會「空轉通過」。
 
 ### 整合測試（`Strata.Api.IntegrationTests`）
 
@@ -297,14 +323,19 @@ Fixture 有兩個刻意保留的逃生口：
   claim 全部得到 401，經真實 HTTP 與真正簽章的 token 驗證。
 - `HttpContextCurrentTenantTests`——延後解析、fail-closed 存取、建構永不 throw、
   `IsAvailable` 的語義。
-- `TenantReadIsolationTests`——對抗性資料：`OwnerId` 是操作者自己的，但 `TenantId`
-  是另一個真實租戶，因此 owner authorization **本來會**放行。涵蓋列表、folder 更
-  新／刪除、document 建立於 folder 內／下載、以及 share 的建立／列出／刪除，每一
-  條都斷言資料庫沒有變動、且沒有呼叫過 Blob Storage。
+- `TenantReadIsolationTests`——兩個真實租戶，外租戶資源以其真正的擁有者植入
+  （composite foreign key 令「標記為某租戶、擁有者卻屬另一租戶」的資料根本無法建
+  立）。一條直接的 filter 測試證明 query filter 能獨立於 owner authorization 隱藏
+  外租戶的 folder、document 與 share；API 測試涵蓋跨租戶的列表、folder 更新／刪除、
+  document 建立於 folder 內／下載、以及 share 的建立／列出／刪除，每一條都斷言資料
+  庫沒有變動、且沒有呼叫過 Blob Storage。
 - `TenantWriteIsolationTests`——直接針對 interceptor：新增時帶外租戶 `TenantId`；
   以該行真實租戶值的 stub 刪除；以**偽造成當前租戶**的 stub 刪除；`Update` 把
   A→B 搬遷；對外租戶資料以偽造 id 做 `Update`；沒有租戶 context 的寫入；以及各自
-  的合法對照組，另加一條覆蓋同步 `SaveChanges` 路徑。
+  的合法對照組，另加一條覆蓋同步 `SaveChanges` 路徑。第二組測試以擁有資料的租戶身
+  分直接寫入——令 interceptor 放行——以證明 database 本身會拒絕每一種跨租戶關聯：
+  share 接收者、share document、folder 擁有者、父 folder、document 擁有者，以及
+  document 所在 folder。
 - 分享行為——同租戶 Member／Viewer 的測試直接用 `UserManager` 植入一個同租戶使用
   者，因為每次呼叫 `/api/auth/register` 都會鑄造一個全新租戶，因此不可能產生兩個
   同租戶的使用者。

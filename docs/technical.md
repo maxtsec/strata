@@ -82,12 +82,21 @@ All foreign keys use `DeleteBehavior.Restrict` except
 `DocumentShare → Document`, which cascades (deleting a document removes its
 shares).
 
-| Table | Indexes |
-|---|---|
-| `Folders` | `TenantId` |
-| `Documents` | `TenantId` |
-| `DocumentShares` | `TenantId`; unique `(DocumentId, UserId)` |
-| `AspNetUsers` | `TenantId` |
+Every relationship between tenant-owned rows (and to their owning user) is a
+**composite** foreign key that includes `TenantId`, referencing an
+`(Id, TenantId)` alternate key on the principal. SQL Server therefore rejects
+an owner, parent folder, document folder, share document, or share recipient
+from another tenant, whichever code path writes the row. A nullable
+`ParentFolderId` / `FolderId` leaves the composite key unchecked, as it
+should for a root folder or an unfiled document. The plain `TenantId → Tenants`
+foreign keys remain alongside them.
+
+| Table | Alternate key | Indexes |
+|---|---|---|
+| `Folders` | `(Id, TenantId)` | `TenantId`; `(OwnerId, TenantId)`; `(ParentFolderId, TenantId)` |
+| `Documents` | `(Id, TenantId)` | `TenantId`; `(OwnerId, TenantId)`; `(FolderId, TenantId)` |
+| `DocumentShares` | — | `TenantId`; unique `(DocumentId, UserId)`; `(DocumentId, TenantId)`; `(UserId, TenantId)` |
+| `AspNetUsers` | `(Id, TenantId)` | `TenantId` |
 
 The unique `(DocumentId, UserId)` index is the real guard against duplicate
 shares; the application's pre-check is an optimisation, and `CreateShare`
@@ -107,6 +116,8 @@ is never auto-applied by CI.
 | `20260905020127_AddTenant` | `Tenants` table only |
 | `20260905025451_AddApplicationUserTenantId` | Required `ApplicationUser.TenantId`, legacy users backfilled to a deterministic Legacy Tenant |
 | `20260905051133_AddTenantIdToResources` | Required `TenantId` on `Folders` / `Documents` / `DocumentShares` |
+| `20260924023345_EnforceSameTenantDocumentShares` | Composite `(DocumentId, TenantId)` and `(UserId, TenantId)` foreign keys on `DocumentShares` |
+| `20260924025709_EnforceSameTenantOwnershipAndFolderRelationships` | Composite owner, parent-folder, and document-folder foreign keys on `Folders` / `Documents` |
 
 ### The staged, fail-closed migration pattern
 
@@ -132,6 +143,15 @@ The `AddTenantIdToResources` migration was rehearsed against a disposable
 database migrated to N−1 and seeded with representative cross-tenant data,
 including a deliberate negative test proving the `RAISERROR` checks actually
 abort and leave zero partial changes.
+
+The two same-tenant relationship migrations add no columns, so they need only
+the validation stage: before dropping any single-column foreign key, each
+checks existing rows for a relationship that crosses tenants and, if one is
+found, stops with a message naming it. They use `SET XACT_ABORT ON` and
+`THROW` rather than `RAISERROR`, so the migration aborts and rolls back
+whether it is applied by `dotnet ef database update` or from a generated SQL
+script — a severity-16 `RAISERROR` only stops the former. Inconsistent rows
+are never deleted or rewritten by a migration; they are left for review.
 
 ## 5. Request pipeline and DI
 
@@ -266,13 +286,17 @@ only after all its validation passes — flushes both in one transaction.
 
 Every create path assigns `TenantId` from `ICurrentTenant` server-side; a
 client-supplied `tenantId` field is inert (covered by tests). A share is
-stamped with its **document's** tenant, never the recipient's.
+stamped with its **document's** tenant, never the recipient's, and
+`POST /api/documents/{id}/shares` rejects a recipient in another tenant with
+the same `400 User not found.` as an unknown email, so the endpoint does not
+reveal whether an address has an account elsewhere. The composite foreign
+keys (§3) enforce the same rule in the database.
 
 Missing and unauthorised resources both return 404 (anti-enumeration).
 
 ## 8. Testing
 
-89 tests: 2 architecture + 87 integration.
+102 tests: 7 architecture + 95 integration.
 
 ### Architecture tests (`Strata.Architecture.Tests`)
 
@@ -280,6 +304,14 @@ NetArchTest asserts `Strata.Domain` has no dependency on `Strata.Application`,
 `Strata.Infrastructure`, `Strata.Api`, EF Core, or ASP.NET Core; and that
 `Strata.Application` depends on neither `Strata.Infrastructure` nor
 `Strata.Api`. The layering is enforced, not just documented.
+
+`TenantFilterBypassTests` enforces the ADR 0004 policy on filter-bypassing
+APIs. It reads each production assembly's IL with Mono.Cecil (including async
+state machines and lambda closures) and fails if anything calls
+`IgnoreQueryFilters`, `ExecuteUpdate`/`ExecuteDelete`, or a raw-SQL API
+(`FromSql*`, `ExecuteSql*`, `SqlQuery*`) outside a reviewed allowlist, which
+is currently empty. A companion test checks the scanner against a deliberate
+violation in the test assembly, so the rule cannot pass vacuously.
 
 ### Integration tests (`Strata.Api.IntegrationTests`)
 
@@ -314,16 +346,23 @@ Notable test groups:
   `tenant_id` claims all yield 401, via real HTTP with really-signed tokens.
 - `HttpContextCurrentTenantTests` — lazy resolution, fail-closed access,
   construction never throwing, `IsAvailable` semantics.
-- `TenantReadIsolationTests` — adversarial rows whose `OwnerId` is the acting
-  user's own but whose `TenantId` is a different real tenant, so owner
-  authorization *would* allow them. Covers list, folder update/delete,
-  document create-in-folder / download, and share create/list/delete, each
-  asserting no database mutation and no Blob Storage call.
+- `TenantReadIsolationTests` — two real tenants, with foreign resources seeded
+  under their actual owners (the composite foreign keys make a row labelled
+  with one tenant but owned by another's user impossible to create). A direct
+  filter test proves the query filters hide foreign folders, documents, and
+  shares independently of owner authorization; API tests cover list, folder
+  update/delete, document create-in-folder / download, and share
+  create/list/delete across tenants, each asserting no database mutation and
+  no Blob Storage call.
 - `TenantWriteIsolationTests` — the interceptor directly: foreign `TenantId`
   on add; stub delete with the row's real tenant; stub delete with a **forged**
   current-tenant id; `Update` retargeting A→B; `Update` on a foreign row with a
   forged id; no-tenant-context writes; plus the legitimate counterparts, and
-  one test covering the synchronous `SaveChanges` path.
+  one test covering the synchronous `SaveChanges` path. A second group writes
+  directly as the owning tenant — so the interceptor accepts it — to prove the
+  database itself rejects each cross-tenant relationship: share recipient,
+  share document, folder owner, folder parent, document owner, and document
+  folder.
 - Sharing behaviour — same-tenant Member/Viewer tests seed a sibling user
   directly via `UserManager`, because every `/api/auth/register` call mints a
   brand-new tenant and therefore cannot produce two users in one tenant.

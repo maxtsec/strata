@@ -170,7 +170,10 @@ Two design choices worth naming:
   architecture *test* that asserts coverage, not for the production wiring.
 - **`Tenant` and `ApplicationUser` are deliberately not filtered.**
   Authentication must be able to find a user before a tenant is established,
-  and share-recipient lookup is a separate concern (§7).
+  and sharing looks recipients up by email. The share endpoint therefore
+  checks the recipient's tenant itself, and rejects a cross-tenant recipient
+  with the same response as an unknown email so the endpoint cannot be used
+  to discover which addresses have accounts.
 
 Because filters only apply to LINQ query paths, `FindAsync` was removed from
 every security-sensitive lookup: `FindAsync` can return an already-tracked
@@ -215,6 +218,31 @@ version of this design got that backwards, and the review that caught it is
 part of why the rule is stated so explicitly here.
 
 *Does not cover:* `ExecuteUpdate` / `ExecuteDelete` / raw SQL (§7).
+
+### Backstop — database relationship constraints
+
+The four layers keep each *row* in its tenant; they do not by themselves stop
+a row in one tenant from *pointing at* a row in another. Composite foreign
+keys close that at the database: every relationship includes `TenantId` on
+both sides, referencing an `(Id, TenantId)` alternate key on the principal.
+
+| Dependent | References | Guarantees |
+|---|---|---|
+| `Folder.(OwnerId, TenantId)` | `AspNetUsers.(Id, TenantId)` | A folder's owner is in the folder's tenant |
+| `Folder.(ParentFolderId, TenantId)` | `Folders.(Id, TenantId)` | A folder tree never crosses tenants |
+| `Document.(OwnerId, TenantId)` | `AspNetUsers.(Id, TenantId)` | A document's owner is in the document's tenant |
+| `Document.(FolderId, TenantId)` | `Folders.(Id, TenantId)` | A document's folder is in the document's tenant |
+| `DocumentShare.(DocumentId, TenantId)` | `Documents.(Id, TenantId)` | A share is labelled with its document's tenant |
+| `DocumentShare.(UserId, TenantId)` | `AspNetUsers.(Id, TenantId)` | A share's recipient is in that same tenant |
+
+Unlike layers 3 and 4, these hold for every writer — `ExecuteUpdate`, raw
+SQL, and a support script included — because SQL Server checks them itself.
+The migrations that introduced them check existing rows first and abort
+(rolling back, with a message naming the broken relationship) rather than
+deleting or rewriting inconsistent data.
+
+*Does not cover:* which tenant a row belongs to in the first place — only
+that its relationships agree with it. Reads are unaffected.
 
 ### How the layers compose
 
@@ -264,19 +292,17 @@ avoid — hence layers 3 and 4 exist independently of it.
 Stated plainly, because a gap that is written down is a design decision and a
 gap that is not is a defect.
 
-- **Cross-tenant shares are not rejected at creation.** Tenant A can still
-  create a share naming a Tenant B user. The share is stamped with the
-  *document's* tenant (never the recipient's), so it does not launder the
-  document into another tenant, and the read filter makes it unusable for the
-  recipient — it is a dead row, not a leak. Same-tenant relationship
-  enforcement is the next planned piece of work.
 - **`ExecuteUpdate` / `ExecuteDelete` / raw SQL bypass both layers 3 and 4.**
   Set-based statements never load entities into the change tracker, so the
   interceptor cannot see them; a query filter constrains which rows such a
-  statement reads, but not the values it assigns. Project policy: these, and
+  statement reads, but not the values it assigns. The relationship
+  constraints still hold, but nothing stops such a statement from reading or
+  relabelling a whole consistent set of rows. Project policy: these, and
   `IgnoreQueryFilters`, must not be used on tenant-owned data without a
   separate tenant-isolation design review, explicit enforcement, and
-  adversarial tests. Today the containment is policy, not code.
+  adversarial tests. An architecture test fails CI if production code calls
+  any of them outside a reviewed allowlist (currently empty), so the policy
+  cannot be broken silently — but there is still no runtime enforcement.
 - **Operational and privileged database access bypasses everything.** A query
   run through SSMS or a support script with the SQL admin credential is
   outside the application's query surface entirely. Query filters and
@@ -312,9 +338,10 @@ retrofit. Doing the retrofit — including the staged, fail-closed data
 migration that backfills existing rows from their real relationships — is part
 of the intended lesson, not an accident of sequencing.
 
-**Phase 2 remaining:** same-tenant relationship enforcement; the complete
-adversarial two-tenant test matrix in CI; finalising the tenant-isolation ADR
-once the enforcement design is settled.
+**Phase 2 remaining:** applying the same-tenant relationship constraint
+migrations to Azure SQL and verifying them there. The enforcement design,
+the adversarial two-tenant tests in CI, and the final tenant-isolation ADR are
+in place.
 
 Phase 5 is where isolation gets genuinely harder: a vector store is a weaker
 system than a relational one, many of them filter *after* search rather than

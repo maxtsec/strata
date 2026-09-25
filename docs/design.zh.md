@@ -155,7 +155,9 @@ LINQ query 上。
   「每個 `ITenantOwned` 都有 filter」的 architecture **測試**上，而不是 production
   的 wiring。
 - **`Tenant` 與 `ApplicationUser` 刻意不加 filter。** Authentication 必須能在租戶
-  身分成立之前先找到 user，而分享對象（recipient）查找是另一件事（§7）。
+  身分成立之前先找到 user，而分享時是以 email 查找接收者（recipient）。因此分享
+  endpoint 會自行檢查接收者的租戶；接收者屬於其他租戶時，回應與「email 不存在」
+  完全相同，令這個 endpoint 無法被用來探測哪些地址有帳戶。
 
 由於 filter 只作用於 LINQ query 路徑，所有具安全意義的查找都已移除
 `FindAsync`：`FindAsync` 可能直接從 change tracker 傳回一個已被追蹤的 entity 而
@@ -194,6 +196,27 @@ Query filter 只改寫 `SELECT`，僅此而已。`TenantWriteGuardInterceptor` �
 review，正是這條規則在此被如此明確寫出的原因。
 
 *不負責：* `ExecuteUpdate` / `ExecuteDelete` / raw SQL（§7）。
+
+### 後備防線 — database 關聯約束
+
+四層防線確保每一行 *row* 留在自己的租戶內，但它們本身不能阻止某租戶的 row *指向*
+另一租戶的 row。Composite foreign key 在 database 層補上這一點：每條關聯兩邊都包含
+`TenantId`，指向 principal 上的 `(Id, TenantId)` alternate key。
+
+| Dependent | 指向 | 保證 |
+|---|---|---|
+| `Folder.(OwnerId, TenantId)` | `AspNetUsers.(Id, TenantId)` | Folder 的擁有者屬於該 folder 的租戶 |
+| `Folder.(ParentFolderId, TenantId)` | `Folders.(Id, TenantId)` | Folder 樹不會跨租戶 |
+| `Document.(OwnerId, TenantId)` | `AspNetUsers.(Id, TenantId)` | Document 的擁有者屬於該 document 的租戶 |
+| `Document.(FolderId, TenantId)` | `Folders.(Id, TenantId)` | Document 所在的 folder 屬於該 document 的租戶 |
+| `DocumentShare.(DocumentId, TenantId)` | `Documents.(Id, TenantId)` | Share 標記的是其 document 的租戶 |
+| `DocumentShare.(UserId, TenantId)` | `AspNetUsers.(Id, TenantId)` | Share 的接收者屬於同一租戶 |
+
+與第 3、4 層不同，這些約束對任何寫入者都成立——包括 `ExecuteUpdate`、raw SQL 以及
+支援腳本——因為由 SQL Server 自己檢查。引入它們的 migration 會先檢查既有資料，發現
+問題就中止並 rollback（附上指明哪條關聯出錯的訊息），而不會刪除或改寫不一致的資料。
+
+*不負責：* 一行 row 最初屬於哪個租戶——只保證它的關聯與之一致。讀取不受影響。
 
 ### 四層如何合起來運作
 
@@ -239,15 +262,14 @@ owner 是逐個使用者的；但它回答的是「這是不是正確的使用�
 
 坦白列出，因為寫下來的缺口是設計決定，沒寫下來的缺口是缺陷。
 
-- **跨租戶分享在建立時不會被拒絕。** 租戶 A 仍然可以建立一個指名租戶 B 使用者的
-  share。該 share 會被蓋上**document 的**租戶標記（絕不會用接收者的），所以它不
-  會把 document 洗進另一個租戶；而 read filter 令接收者根本用不到它——它是一行死
-  資料，不是洩漏。Same-tenant relationship enforcement 是下一項計劃中的工作。
 - **`ExecuteUpdate` / `ExecuteDelete` / raw SQL 同時繞過第 3、4 層。** 集合式語句
   從不把 entity 載入 change tracker，所以 interceptor 看不到它們；query filter 能
-  限制這類語句讀取哪些 row，但管不到它賦予什麼值。項目政策：這三者連同
+  限制這類語句讀取哪些 row，但管不到它賦予什麼值。關聯約束仍然有效，但無法阻止
+  這類語句讀取或整批改標一組彼此一致的 row。項目政策：這三者連同
   `IgnoreQueryFilters`，未經獨立的租戶隔離設計 review、明確的強制機制與對抗性測試
-  之前，不得用於租戶資料。目前的圍堵是政策，不是程式碼。
+  之前，不得用於租戶資料。若 production 程式碼在已 review 的 allowlist（目前為空）
+  之外呼叫其中任何一個，architecture test 會令 CI 失敗，所以政策不會被悄悄違反——
+  但 runtime 仍然沒有強制機制。
 - **營運與特權 database 存取繞過一切。** 用 SSMS 或帶 SQL admin 憑證的支援腳本跑
   的 query，完全在應用程式的 query surface 之外。Query filter 與 interceptor 不是
   database 層級的存取控制。
@@ -277,8 +299,9 @@ owner 是逐個使用者的；但它回答的是「這是不是正確的使用�
 ——包括那個分階段、fail-closed、從真實關聯回填既有資料的 migration——本身就是預期
 中的課題，不是排序上的意外。
 
-**第 2 階段餘下工作：** same-tenant relationship enforcement；在 CI 內完整的雙租
-戶對抗性測試矩陣；待強制機制設計定案後，完成 tenant-isolation ADR。
+**第 2 階段餘下工作：** 將 same-tenant 關聯約束的 migration 套用到 Azure SQL 並在
+該處驗證。強制機制設計、CI 內的雙租戶對抗性測試，以及最終版 tenant-isolation ADR
+均已完成。
 
 第 5 階段才是隔離真正變難的地方：向量資料庫是比關聯式資料庫更弱的系統，其中不少
 是在搜尋**之後**才過濾——而搜尋後過濾意味著另一個租戶的 chunk 早已被檢索出來。計
