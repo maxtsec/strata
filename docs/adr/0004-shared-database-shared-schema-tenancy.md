@@ -88,7 +88,10 @@ documented call switches it off for any query that makes it. The current
 `SaveChanges` interceptor does not see bulk writes, and no command
 interceptor or database-level Row-Level Security is configured to cover
 that gap — the policy above remains the containment until each path gets
-its own enforcement design and adversarial tests.
+its own enforcement design and adversarial tests. The policy is checked in
+CI: an architecture test (`TenantFilterBypassTests`) scans the compiled
+production assemblies and fails if any of these APIs is called outside an
+explicitly reviewed allowlist, which is currently empty.
 
 A schema change (a new column, a new table) is felt by every tenant at
 once — there is no way to roll a migration out to one tenant first, unlike
