@@ -12,12 +12,14 @@ public class DocumentShareConfiguration : IEntityTypeConfiguration<DocumentShare
     {
         builder.HasOne<Document>()
             .WithMany()
-            .HasForeignKey(share => share.DocumentId)
+            .HasForeignKey(share => new { share.DocumentId, share.TenantId })
+            .HasPrincipalKey(document => new { document.Id, document.TenantId })
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasOne<ApplicationUser>()
             .WithMany()
-            .HasForeignKey(share => share.UserId)
+            .HasForeignKey(share => new { share.UserId, share.TenantId })
+            .HasPrincipalKey(user => new { user.Id, user.TenantId })
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne<Tenant>()

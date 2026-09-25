@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Strata.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Strata.Infrastructure.Persistence;
 namespace Strata.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260924023345_EnforceSameTenantDocumentShares")]
+    partial class EnforceSameTenantDocumentShares
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -181,11 +184,11 @@ namespace Strata.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FolderId");
+
+                    b.HasIndex("OwnerId");
+
                     b.HasIndex("TenantId");
-
-                    b.HasIndex("FolderId", "TenantId");
-
-                    b.HasIndex("OwnerId", "TenantId");
 
                     b.ToTable("Documents");
                 });
@@ -243,11 +246,11 @@ namespace Strata.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("OwnerId");
+
+                    b.HasIndex("ParentFolderId");
+
                     b.HasIndex("TenantId");
-
-                    b.HasIndex("OwnerId", "TenantId");
-
-                    b.HasIndex("ParentFolderId", "TenantId");
 
                     b.ToTable("Folders");
                 });
@@ -395,22 +398,20 @@ namespace Strata.Infrastructure.Migrations
 
             modelBuilder.Entity("Strata.Domain.Documents.Document", b =>
                 {
-                    b.HasOne("Strata.Domain.Tenancy.Tenant", null)
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("Strata.Domain.Documents.Folder", null)
                         .WithMany()
-                        .HasForeignKey("FolderId", "TenantId")
-                        .HasPrincipalKey("Id", "TenantId")
+                        .HasForeignKey("FolderId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Strata.Infrastructure.Identity.ApplicationUser", null)
                         .WithMany()
-                        .HasForeignKey("OwnerId", "TenantId")
-                        .HasPrincipalKey("Id", "TenantId")
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Strata.Domain.Tenancy.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
@@ -440,24 +441,22 @@ namespace Strata.Infrastructure.Migrations
 
             modelBuilder.Entity("Strata.Domain.Documents.Folder", b =>
                 {
-                    b.HasOne("Strata.Domain.Tenancy.Tenant", null)
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("Strata.Infrastructure.Identity.ApplicationUser", null)
                         .WithMany()
-                        .HasForeignKey("OwnerId", "TenantId")
-                        .HasPrincipalKey("Id", "TenantId")
+                        .HasForeignKey("OwnerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Strata.Domain.Documents.Folder", null)
                         .WithMany()
-                        .HasForeignKey("ParentFolderId", "TenantId")
-                        .HasPrincipalKey("Id", "TenantId")
+                        .HasForeignKey("ParentFolderId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Strata.Domain.Tenancy.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Strata.Infrastructure.Identity.ApplicationUser", b =>

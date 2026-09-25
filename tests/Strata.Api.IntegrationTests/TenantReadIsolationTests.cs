@@ -6,16 +6,11 @@ using Strata.Domain.Documents;
 
 namespace Strata.Api.IntegrationTests;
 
-// Proves the EF Core global query filters on AppDbContext (Folder, Document,
-// DocumentShare) are what blocks cross-tenant reads — not owner
-// authorization, which has always run on a per-user basis and knows nothing
-// about tenants. Every adversarial row here has OwnerId set to the acting
-// user's own id (so owner authorization alone would let it through) but
-// TenantId set to a different, real tenant. That combination should never
-// occur through the API as it stands today, but the tenant filter is
-// expected to hold as a second, independent boundary if it ever did — the
-// same defence-in-depth reasoning as the query filter plus the (still
-// pending) SaveChanges interceptor.
+// Exercises reads across two real tenants. Database composite foreign keys
+// prevent a resource from being labelled as one tenant while naming another
+// tenant's owner, so foreign resources are seeded with their actual owners.
+// The direct filter test below verifies the query filters independently of
+// the API's per-user owner authorization.
 public class TenantReadIsolationTests : IntegrationTestBase
 {
     public TenantReadIsolationTests(IntegrationTestFixture fixture) : base(fixture)
@@ -30,21 +25,16 @@ public class TenantReadIsolationTests : IntegrationTestBase
         return (client, TestApiHelpers.UserIdFromToken(token), TestApiHelpers.TenantIdFromToken(token));
     }
 
-    // Seeds as the foreign tenant itself (not via QueryDbAsync, whose
-    // DbContext has no HttpContext and — now that write validation fails
-    // closed instead of skipping when no tenant is available — would be
-    // refused). Acting as the row's own labelled tenant produces the exact
-    // same adversarial shape (OwnerId from a different tenant's user): the
-    // interceptor only checks TenantId against the acting tenant, never
-    // OwnerId — that consistency check is separate, still-pending work.
-    private async Task<int> SeedAdversarialFolderAsync(Guid folderId, Guid ownerId, Guid foreignTenantId, string name)
+    // Seed through a context representing the foreign tenant so the write
+    // guard accepts it and the database verifies all relationship keys.
+    private async Task<int> SeedForeignTenantFolderAsync(Guid folderId, Guid ownerId, Guid foreignTenantId, string name)
     {
         await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(foreignTenantId));
         db.Folders.Add(new Folder { Id = folderId, OwnerId = ownerId, TenantId = foreignTenantId, Name = name });
         return await db.SaveChangesAsync(CancellationToken.None);
     }
 
-    private async Task<int> SeedAdversarialDocumentAsync(Guid documentId, Guid ownerId, Guid foreignTenantId, string name)
+    private async Task<int> SeedForeignTenantDocumentAsync(Guid documentId, Guid ownerId, Guid foreignTenantId, string name)
     {
         await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(foreignTenantId));
         db.Documents.Add(new Document
@@ -59,7 +49,7 @@ public class TenantReadIsolationTests : IntegrationTestBase
         return await db.SaveChangesAsync(CancellationToken.None);
     }
 
-    private async Task<int> SeedAdversarialShareAsync(Guid shareId, Guid documentId, Guid userId, Guid foreignTenantId)
+    private async Task<int> SeedForeignTenantShareAsync(Guid shareId, Guid documentId, Guid userId, Guid foreignTenantId)
     {
         await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(foreignTenantId));
         db.DocumentShares.Add(new DocumentShare
@@ -74,12 +64,35 @@ public class TenantReadIsolationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task List_folders_excludes_adversarial_row_owned_by_current_user()
+    public async Task Tenant_filters_hide_foreign_folders_documents_and_shares()
     {
-        var (client, userId, _) = await AuthenticatedOwnerAsync("isolation-list-a@test.local");
-        var (_, _, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-list-b@test.local");
+        var (_, _, tenantAId) = await AuthenticatedOwnerAsync("isolation-filter-a@test.local");
+        var (clientB, _, tenantBId) = await AuthenticatedOwnerAsync("isolation-filter-b@test.local");
+        await TestApiHelpers.AuthenticatedSameTenantClientAsync(
+            Fixture.Factory, tenantBId, "isolation-filter-recipient@test.local");
+
+        var folderId = await TestApiHelpers.CreateFolderAsync(clientB, "B's folder");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(clientB, "B's document.txt", folderId);
+        var shareId = await TestApiHelpers.CreateShareAsync(
+            clientB, documentId, "isolation-filter-recipient@test.local", DocumentShare.Role.Viewer);
+
+        await using var db = Fixture.CreateDbContext(new FixedCurrentTenant(tenantAId));
+        Assert.False(await db.Folders.AnyAsync(folder => folder.Id == folderId));
+        Assert.False(await db.Documents.AnyAsync(document => document.Id == documentId));
+        Assert.False(await db.DocumentShares.AnyAsync(share => share.Id == shareId));
+
+        Assert.True(await db.Folders.IgnoreQueryFilters().AnyAsync(folder => folder.Id == folderId));
+        Assert.True(await db.Documents.IgnoreQueryFilters().AnyAsync(document => document.Id == documentId));
+        Assert.True(await db.DocumentShares.IgnoreQueryFilters().AnyAsync(share => share.Id == shareId));
+    }
+
+    [Fact]
+    public async Task List_folders_excludes_foreign_tenant_row()
+    {
+        var (client, _, _) = await AuthenticatedOwnerAsync("isolation-list-a@test.local");
+        var (_, foreignOwnerId, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-list-b@test.local");
         var adversarialFolderId = Guid.NewGuid();
-        await SeedAdversarialFolderAsync(adversarialFolderId, userId, foreignTenantId, "Adversarial");
+        await SeedForeignTenantFolderAsync(adversarialFolderId, foreignOwnerId, foreignTenantId, "Adversarial");
 
         var response = await client.GetAsync("/api/folders");
         var folders = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -90,12 +103,12 @@ public class TenantReadIsolationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task Update_adversarial_folder_returns_404_and_leaves_it_unchanged()
+    public async Task Update_foreign_tenant_folder_returns_404_and_leaves_it_unchanged()
     {
-        var (client, userId, _) = await AuthenticatedOwnerAsync("isolation-update-a@test.local");
-        var (_, _, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-update-b@test.local");
+        var (client, _, _) = await AuthenticatedOwnerAsync("isolation-update-a@test.local");
+        var (_, foreignOwnerId, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-update-b@test.local");
         var adversarialFolderId = Guid.NewGuid();
-        await SeedAdversarialFolderAsync(adversarialFolderId, userId, foreignTenantId, "Original");
+        await SeedForeignTenantFolderAsync(adversarialFolderId, foreignOwnerId, foreignTenantId, "Original");
 
         var response = await client.PutAsJsonAsync(
             $"/api/folders/{adversarialFolderId}", new { Name = "Hijacked", ParentFolderId = (Guid?)null });
@@ -108,12 +121,12 @@ public class TenantReadIsolationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task Delete_adversarial_folder_returns_404_and_leaves_it_in_place()
+    public async Task Delete_foreign_tenant_folder_returns_404_and_leaves_it_in_place()
     {
-        var (client, userId, _) = await AuthenticatedOwnerAsync("isolation-delete-a@test.local");
-        var (_, _, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-delete-b@test.local");
+        var (client, _, _) = await AuthenticatedOwnerAsync("isolation-delete-a@test.local");
+        var (_, foreignOwnerId, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-delete-b@test.local");
         var adversarialFolderId = Guid.NewGuid();
-        await SeedAdversarialFolderAsync(adversarialFolderId, userId, foreignTenantId, "Untouchable");
+        await SeedForeignTenantFolderAsync(adversarialFolderId, foreignOwnerId, foreignTenantId, "Untouchable");
 
         var response = await client.DeleteAsync($"/api/folders/{adversarialFolderId}");
 
@@ -125,12 +138,12 @@ public class TenantReadIsolationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task Create_document_in_adversarial_folder_returns_400_and_creates_nothing()
+    public async Task Create_document_in_foreign_tenant_folder_returns_400_and_creates_nothing()
     {
-        var (client, userId, _) = await AuthenticatedOwnerAsync("isolation-createdoc-a@test.local");
-        var (_, _, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-createdoc-b@test.local");
+        var (client, _, _) = await AuthenticatedOwnerAsync("isolation-createdoc-a@test.local");
+        var (_, foreignOwnerId, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-createdoc-b@test.local");
         var adversarialFolderId = Guid.NewGuid();
-        await SeedAdversarialFolderAsync(adversarialFolderId, userId, foreignTenantId, "Adversarial folder");
+        await SeedForeignTenantFolderAsync(adversarialFolderId, foreignOwnerId, foreignTenantId, "Adversarial folder");
 
         var documentCountBefore = await Fixture.QueryDbAsync(db =>
             db.Documents.AsNoTracking().IgnoreQueryFilters().CountAsync());
@@ -152,12 +165,12 @@ public class TenantReadIsolationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task Download_adversarial_document_returns_404_and_never_calls_file_storage()
+    public async Task Download_foreign_tenant_document_returns_404_and_never_calls_file_storage()
     {
-        var (client, userId, _) = await AuthenticatedOwnerAsync("isolation-download-a@test.local");
-        var (_, _, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-download-b@test.local");
+        var (client, _, _) = await AuthenticatedOwnerAsync("isolation-download-a@test.local");
+        var (_, foreignOwnerId, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-download-b@test.local");
         var adversarialDocumentId = Guid.NewGuid();
-        await SeedAdversarialDocumentAsync(adversarialDocumentId, userId, foreignTenantId, "adversarial.txt");
+        await SeedForeignTenantDocumentAsync(adversarialDocumentId, foreignOwnerId, foreignTenantId, "adversarial.txt");
 
         var response = await client.GetAsync($"/api/documents/{adversarialDocumentId}/download");
 
@@ -168,10 +181,10 @@ public class TenantReadIsolationTests : IntegrationTestBase
     [Fact]
     public async Task CreateShare_on_adversarial_document_returns_404_and_creates_no_share()
     {
-        var (client, userId, _) = await AuthenticatedOwnerAsync("isolation-createshare-a@test.local");
-        var (_, _, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-createshare-b@test.local");
+        var (client, _, _) = await AuthenticatedOwnerAsync("isolation-createshare-a@test.local");
+        var (_, foreignOwnerId, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-createshare-b@test.local");
         var adversarialDocumentId = Guid.NewGuid();
-        await SeedAdversarialDocumentAsync(adversarialDocumentId, userId, foreignTenantId, "adversarial.txt");
+        await SeedForeignTenantDocumentAsync(adversarialDocumentId, foreignOwnerId, foreignTenantId, "adversarial.txt");
 
         var response = await client.PostAsJsonAsync($"/api/documents/{adversarialDocumentId}/shares",
             new { Email = "isolation-createshare-a@test.local", Role = DocumentShare.Role.Viewer });
@@ -186,10 +199,10 @@ public class TenantReadIsolationTests : IntegrationTestBase
     [Fact]
     public async Task ListShares_on_adversarial_document_returns_404()
     {
-        var (client, userId, _) = await AuthenticatedOwnerAsync("isolation-listshare-a@test.local");
-        var (_, _, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-listshare-b@test.local");
+        var (client, _, _) = await AuthenticatedOwnerAsync("isolation-listshare-a@test.local");
+        var (_, foreignOwnerId, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-listshare-b@test.local");
         var adversarialDocumentId = Guid.NewGuid();
-        await SeedAdversarialDocumentAsync(adversarialDocumentId, userId, foreignTenantId, "adversarial.txt");
+        await SeedForeignTenantDocumentAsync(adversarialDocumentId, foreignOwnerId, foreignTenantId, "adversarial.txt");
 
         var response = await client.GetAsync($"/api/documents/{adversarialDocumentId}/shares");
 
@@ -199,12 +212,15 @@ public class TenantReadIsolationTests : IntegrationTestBase
     [Fact]
     public async Task DeleteShare_on_adversarial_document_returns_404_and_leaves_share_in_place()
     {
-        var (client, userId, _) = await AuthenticatedOwnerAsync("isolation-deleteshare-a@test.local");
-        var (_, _, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-deleteshare-b@test.local");
+        var (client, _, _) = await AuthenticatedOwnerAsync("isolation-deleteshare-a@test.local");
+        var (_, documentOwnerId, foreignTenantId) = await AuthenticatedOwnerAsync("isolation-deleteshare-b@test.local");
+        var recipientClient = await TestApiHelpers.AuthenticatedSameTenantClientAsync(
+            Fixture.Factory, foreignTenantId, "isolation-deleteshare-recipient@test.local");
+        var recipientId = TestApiHelpers.UserIdFromToken(recipientClient.DefaultRequestHeaders.Authorization!.Parameter!);
         var adversarialDocumentId = Guid.NewGuid();
-        await SeedAdversarialDocumentAsync(adversarialDocumentId, userId, foreignTenantId, "adversarial.txt");
+        await SeedForeignTenantDocumentAsync(adversarialDocumentId, documentOwnerId, foreignTenantId, "adversarial.txt");
         var adversarialShareId = Guid.NewGuid();
-        await SeedAdversarialShareAsync(adversarialShareId, adversarialDocumentId, userId, foreignTenantId);
+        await SeedForeignTenantShareAsync(adversarialShareId, adversarialDocumentId, recipientId, foreignTenantId);
 
         var response = await client.DeleteAsync($"/api/documents/{adversarialDocumentId}/shares/{adversarialShareId}");
 

@@ -150,8 +150,10 @@ public class DocumentsController : ControllerBase
         }
 
         var recipient = await _userManager.FindByEmailAsync(request.Email);
-        if (recipient is null)
+        if (recipient is null || recipient.TenantId != document.TenantId)
         {
+            // Keep cross-tenant recipients indistinguishable from unknown
+            // emails so this endpoint does not reveal account membership.
             return BadRequest("User not found.");
         }
 
@@ -167,10 +169,9 @@ public class DocumentsController : ControllerBase
             return Conflict("Document is already shared with this user.");
         }
 
-        // The share's tenant follows the document being shared, not the
-        // recipient — same-tenant recipient enforcement is later work, but
-        // the share itself must always be labelled with its document's
-        // tenant, never the recipient's.
+        // The API check above gives a useful early response. Composite foreign
+        // keys on DocumentShare provide the final invariant at the database:
+        // its tenant must match both the document and recipient.
         var documentShare = new DocumentShare
         {
             Id = Guid.NewGuid(),
