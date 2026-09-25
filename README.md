@@ -45,7 +45,7 @@ increment rather than a pile of untested code.
 - [x] Same-tenant ownership and folder/document relationship constraints at the database boundary
 - [x] Adversarial two-tenant integration tests cover API isolation and database relationship constraints, and run in CI
 - [x] Tenant-isolation ADR finalized with the implemented relationship constraints and remaining limitations
-- [x] Architecture test fails CI if production code calls a query-filter or interceptor bypass (`IgnoreQueryFilters`, `ExecuteUpdate`/`ExecuteDelete`, raw SQL) without a reviewed exception
+- [x] Architecture test fails CI if production code calls a query-filter or interceptor bypass (`IgnoreQueryFilters`, `ExecuteUpdate`/`ExecuteDelete`, raw SQL, raw ADO.NET) without a reviewed exception
 - [ ] Same-tenant relationship constraint migrations applied and verified against Azure SQL
 
 Tenant IDs are now trusted and correctly persisted, and both reads and

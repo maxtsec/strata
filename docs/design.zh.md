@@ -268,7 +268,7 @@ owner 是逐個使用者的；但它回答的是「這是不是正確的使用�
   這類語句讀取或整批改標一組彼此一致的 row。項目政策：這三者連同
   `IgnoreQueryFilters`，未經獨立的租戶隔離設計 review、明確的強制機制與對抗性測試
   之前，不得用於租戶資料。若 production 程式碼在已 review 的 allowlist（目前為空）
-  之外呼叫其中任何一個，architecture test 會令 CI 失敗，所以政策不會被悄悄違反——
+  之外呼叫其中任何一個，或經 raw ADO.NET 執行 SQL，architecture test 會令 CI 失敗，所以政策不會被悄悄違反——
   但 runtime 仍然沒有強制機制。
 - **營運與特權 database 存取繞過一切。** 用 SSMS 或帶 SQL admin 憑證的支援腳本跑
   的 query，完全在應用程式的 query surface 之外。Query filter 與 interceptor 不是

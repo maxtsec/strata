@@ -301,7 +301,8 @@ gap that is not is a defect.
   `IgnoreQueryFilters`, must not be used on tenant-owned data without a
   separate tenant-isolation design review, explicit enforcement, and
   adversarial tests. An architecture test fails CI if production code calls
-  any of them outside a reviewed allowlist (currently empty), so the policy
+  any of them, or executes SQL through raw ADO.NET, outside a reviewed
+  allowlist (currently empty), so the policy
   cannot be broken silently — but there is still no runtime enforcement.
 - **Operational and privileged database access bypasses everything.** A query
   run through SSMS or a support script with the SQL admin credential is

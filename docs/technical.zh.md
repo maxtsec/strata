@@ -277,7 +277,7 @@ Identity 自己的 `SaveChangesAsync`——只在它所有驗證通過之後才�
 
 ## 8. 測試
 
-共 102 條測試：7 條架構測試 + 95 條整合測試。
+共 107 條測試：12 條架構測試 + 95 條整合測試。
 
 ### 架構測試（`Strata.Architecture.Tests`）
 
@@ -290,8 +290,9 @@ NetArchTest 斷言 `Strata.Domain` 對 `Strata.Application`、
 Mono.Cecil 讀取每個 production assembly 的 IL（包括 async state machine 與 lambda
 closure），若有任何程式在已 review 的 allowlist（目前為空）之外呼叫
 `IgnoreQueryFilters`、`ExecuteUpdate`/`ExecuteDelete` 或 raw SQL API（`FromSql*`、
-`ExecuteSql*`、`SqlQuery*`），測試即失敗。另一條配套測試用 test assembly 內一個刻意
-的違規來檢驗掃描器本身，確保這條規則不會「空轉通過」。
+`ExecuteSql*`、`SqlQuery*`），或使用 raw ADO.NET（`GetDbConnection`、建立 connection
+或 command、任何 command 的 `Execute*`），測試即失敗。配套測試用 test assembly 內針對
+每類繞過的刻意違規來檢驗掃描器本身，確保這條規則不會「空轉通過」。
 
 ### 整合測試（`Strata.Api.IntegrationTests`）
 
