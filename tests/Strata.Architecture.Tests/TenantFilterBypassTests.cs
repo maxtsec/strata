@@ -1,4 +1,6 @@
+using System.Data.Common;
 using System.Reflection;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Mono.Cecil;
 using Strata.Domain.Documents;
@@ -6,14 +8,16 @@ using Xunit;
 
 namespace Strata.Architecture.Tests;
 
-// Enforces the ADR 0004 project policy: EF Core APIs that bypass the global
-// query filters or the SaveChanges interceptor must not appear in production
-// code without their own tenant-isolation design review. Scans compiled IL
-// rather than source, so calls inside async state machines and lambdas are
-// covered too.
+// Enforces the ADR 0004 project policy: APIs that bypass the global query
+// filters or the SaveChanges interceptor must not appear in production code
+// without their own tenant-isolation design review. That covers EF Core's
+// filter opt-out, bulk and raw-SQL APIs, and raw ADO.NET, which reaches the
+// database without going through EF Core at all. Scans compiled IL rather
+// than source, so calls inside async state machines and lambdas are covered
+// too.
 public class TenantFilterBypassTests
 {
-    private static readonly HashSet<string> BypassMethods =
+    private static readonly HashSet<string> EfCoreBypassMethods =
     [
         "IgnoreQueryFilters",
         "ExecuteUpdate", "ExecuteUpdateAsync",
@@ -22,7 +26,27 @@ public class TenantFilterBypassTests
         "ExecuteSql", "ExecuteSqlAsync",
         "ExecuteSqlRaw", "ExecuteSqlRawAsync",
         "ExecuteSqlInterpolated", "ExecuteSqlInterpolatedAsync",
-        "SqlQuery", "SqlQueryRaw"
+        "SqlQuery", "SqlQueryRaw",
+        "GetDbConnection"
+    ];
+
+    // Raw ADO.NET: opening a connection or creating a command, and executing
+    // one. Matching both ends means a bypass is caught whether it starts from
+    // EF Core's connection or a new one.
+    private static readonly HashSet<string> AdoNetConnectionTypes =
+    [
+        "System.Data.IDbConnection",
+        "System.Data.Common.DbConnection",
+        "Microsoft.Data.SqlClient.SqlConnection",
+        "System.Data.SqlClient.SqlConnection"
+    ];
+
+    private static readonly HashSet<string> AdoNetCommandTypes =
+    [
+        "System.Data.IDbCommand",
+        "System.Data.Common.DbCommand",
+        "Microsoft.Data.SqlClient.SqlCommand",
+        "System.Data.SqlClient.SqlCommand"
     ];
 
     // Each entry must point to the design review and adversarial tests that
@@ -52,15 +76,22 @@ public class TenantFilterBypassTests
             "Tenant-isolation bypass APIs used without review (ADR 0004): " + string.Join("; ", violations));
     }
 
-    [Fact]
-    public void Scanner_Detects_A_Known_Bypass_Call()
+    // Guards against the rule passing vacuously, e.g. if a library renames or
+    // moves these methods and the match silently stops working.
+    [Theory]
+    [InlineData(nameof(KnownViolation.IgnoreFilters), "EntityFrameworkQueryableExtensions.IgnoreQueryFilters")]
+    [InlineData(nameof(KnownViolation.CommandFromEfConnection), "RelationalDatabaseFacadeExtensions.GetDbConnection")]
+    [InlineData(nameof(KnownViolation.CommandFromEfConnection), "DbConnection.CreateCommand")]
+    [InlineData(nameof(KnownViolation.CommandFromEfConnection), "DbCommand.ExecuteNonQuery")]
+    [InlineData(nameof(KnownViolation.CommandFromNewConnection), "SqlConnection..ctor")]
+    [InlineData(nameof(KnownViolation.CommandFromNewConnection), "SqlCommand.ExecuteReader")]
+    public void Scanner_Detects_A_Known_Bypass_Call(string violatingMethod, string expectedCall)
     {
-        // Guards against the rule passing vacuously, e.g. if EF Core renames
-        // or moves these methods and the name match silently stops working.
+        var caller = $"{typeof(KnownViolation).FullName!.Replace('+', '/')}::{violatingMethod}";
+
         var calls = FindBypassCalls(Assembly.GetExecutingAssembly().Location);
 
-        Assert.Contains(calls, call => call.Caller.StartsWith(typeof(KnownViolation).FullName!.Replace('+', '/'))
-            && call.Method == nameof(EntityFrameworkQueryableExtensions.IgnoreQueryFilters));
+        Assert.Contains(calls, call => call.Caller == caller && call.Method == expectedCall);
     }
 
     private static List<BypassCall> FindBypassCalls(string assemblyPath)
@@ -74,10 +105,33 @@ public class TenantFilterBypassTests
             .SelectMany(method => method.Body.Instructions
                 .Select(instruction => instruction.Operand)
                 .OfType<MethodReference>()
-                .Where(called => called.DeclaringType.Namespace.StartsWith("Microsoft.EntityFrameworkCore")
-                    && BypassMethods.Contains(called.Name))
-                .Select(called => new BypassCall($"{method.DeclaringType.FullName}::{method.Name}", called.Name)))
+                .Where(IsBypass)
+                .Select(called => new BypassCall(
+                    $"{method.DeclaringType.FullName}::{method.Name}",
+                    $"{called.DeclaringType.Name}.{called.Name}")))
             .ToList();
+    }
+
+    private static bool IsBypass(MethodReference called)
+    {
+        var declaringType = called.DeclaringType.GetElementType();
+
+        if (declaringType.Namespace.StartsWith("Microsoft.EntityFrameworkCore"))
+        {
+            return EfCoreBypassMethods.Contains(called.Name);
+        }
+
+        if (AdoNetConnectionTypes.Contains(declaringType.FullName))
+        {
+            return called.Name is ".ctor" or "CreateCommand";
+        }
+
+        if (AdoNetCommandTypes.Contains(declaringType.FullName))
+        {
+            return called.Name == ".ctor" || called.Name.StartsWith("Execute");
+        }
+
+        return false;
     }
 
     private sealed record BypassCall(string Caller, string Method)
@@ -87,6 +141,15 @@ public class TenantFilterBypassTests
 
     private static class KnownViolation
     {
-        public static IQueryable<Folder> Query(IQueryable<Folder> folders) => folders.IgnoreQueryFilters();
+        public static IQueryable<Folder> IgnoreFilters(IQueryable<Folder> folders) => folders.IgnoreQueryFilters();
+
+        public static int CommandFromEfConnection(DbContext db)
+        {
+            DbCommand command = db.Database.GetDbConnection().CreateCommand();
+            return command.ExecuteNonQuery();
+        }
+
+        public static SqlDataReader CommandFromNewConnection(string connectionString) =>
+            new SqlConnection(connectionString).CreateCommand().ExecuteReader();
     }
 }

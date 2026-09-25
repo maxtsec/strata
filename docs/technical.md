@@ -296,7 +296,7 @@ Missing and unauthorised resources both return 404 (anti-enumeration).
 
 ## 8. Testing
 
-102 tests: 7 architecture + 95 integration.
+107 tests: 12 architecture + 95 integration.
 
 ### Architecture tests (`Strata.Architecture.Tests`)
 
@@ -309,9 +309,11 @@ NetArchTest asserts `Strata.Domain` has no dependency on `Strata.Application`,
 APIs. It reads each production assembly's IL with Mono.Cecil (including async
 state machines and lambda closures) and fails if anything calls
 `IgnoreQueryFilters`, `ExecuteUpdate`/`ExecuteDelete`, or a raw-SQL API
-(`FromSql*`, `ExecuteSql*`, `SqlQuery*`) outside a reviewed allowlist, which
-is currently empty. A companion test checks the scanner against a deliberate
-violation in the test assembly, so the rule cannot pass vacuously.
+(`FromSql*`, `ExecuteSql*`, `SqlQuery*`), or reaches raw ADO.NET
+(`GetDbConnection`, creating a connection or command, or any command
+`Execute*`), outside a reviewed allowlist, which is currently empty. Companion
+tests check the scanner against deliberate violations in the test assembly,
+one per kind of bypass, so the rule cannot pass vacuously.
 
 ### Integration tests (`Strata.Api.IntegrationTests`)
 
