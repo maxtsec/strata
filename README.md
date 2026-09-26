@@ -27,6 +27,7 @@ increment rather than a pile of untested code.
 - [x] EF Core migrations (applied to local dev DB and Azure SQL)
 - [x] Auth: `POST /api/auth/register` and `/login`, issuing JWTs
 - [x] File upload/download via Blob Storage — user-delegation SAS URIs, no static storage key anywhere
+- [x] Uploads limited to PDF, UTF-8 TXT, PNG, and JPEG up to 25 MB; a create-only upload SAS prevents replacement, and the blob is checked before any download SAS is issued
 - [x] Folders CRUD, with resource-based ownership authorization (`IOwnable` + `OwnerAuthorizationHandler`)
 - [x] Roles / share links — the owner manages the document and its shares; a `Member` can download and rename; a `Viewer` can download but not rename; neither `Member` nor `Viewer` can create, list, or delete shares; missing and unauthorized resources use anti-enumeration responses where implemented
 

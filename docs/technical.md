@@ -272,8 +272,8 @@ automatically — no separate tenant logic was needed in them.
 | `POST` | `/api/folders` | JWT | `TenantId` stamped server-side from `ICurrentTenant` |
 | `PUT` | `/api/folders/{id}` | JWT, owner | Rename / re-parent, with cycle detection |
 | `DELETE` | `/api/folders/{id}` | JWT, owner | 409 if not empty |
-| `POST` | `/api/documents` | JWT | Returns `documentId` + a 15-minute upload SAS URI |
-| `GET` | `/api/documents/{id}/download` | JWT, owner or share | Returns a 15-minute download SAS URI |
+| `POST` | `/api/documents` | JWT | Accepts PDF, UTF-8 TXT, PNG, or JPEG up to 25,000,000 bytes; returns `documentId` + a 15-minute create-only upload SAS URI |
+| `GET` | `/api/documents/{id}/download` | JWT, owner or share | Validates the uploaded blob before returning a 15-minute read SAS URI; 409 if absent, 422 if invalid |
 | `PUT` | `/api/documents/{id}` | JWT, owner or `Member` | Rename |
 | `POST` | `/api/documents/{id}/shares` | JWT, owner | 409 on duplicate |
 | `GET` | `/api/documents/{id}/shares` | JWT, owner | |
@@ -294,9 +294,18 @@ keys (§3) enforce the same rule in the database.
 
 Missing and unauthorised resources both return 404 (anti-enumeration).
 
+The client sends one `Put Blob` request to the upload URI with
+`x-ms-blob-type: BlockBlob` and the declared `Content-Type`. The create-only
+SAS cannot overwrite an existing blob. Download validation checks the stored
+size, MIME type, and blob type, then inspects PDF/PNG/JPEG signatures or the
+entire UTF-8 TXT stream before handing out a read SAS. This checks the blob
+that was actually uploaded rather than trusting the registration request.
+Files that fail validation remain inaccessible through the download endpoint;
+cleanup of abandoned blobs is a separate operational task.
+
 ## 8. Testing
 
-107 tests: 12 architecture + 95 integration.
+123 tests: 12 architecture + 111 integration.
 
 ### Architecture tests (`Strata.Architecture.Tests`)
 
@@ -326,7 +335,7 @@ exercised.
 |---|---|
 | `IntegrationTestFixture` | One migrated database per collection; Respawn resets table contents before every test |
 | `StrataWebApplicationFactory` | Hosts the real app; swaps `IFileStorage` for `FakeFileStorage` |
-| `FakeFileStorage` | Counts upload/download calls so tests can assert Blob Storage was **not** reached |
+| `FakeFileStorage` | Counts upload/validation/download calls and simulates missing or invalid blobs without reaching Azure |
 | `TestApiHelpers` | Register/authenticate, create folders/documents/shares, hand-craft JWTs |
 | `FixedCurrentTenant` / `NoCurrentTenant` | Test doubles for `ICurrentTenant` |
 
