@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Strata.Application.Persistence;
 using Strata.Domain.Documents;
 
 namespace Strata.Api.IntegrationTests;
@@ -22,6 +23,91 @@ public class DocumentsControllerTests : IntegrationTestBase
         var token = await TestApiHelpers.RegisterAsync(client, email);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return (client, TestApiHelpers.TenantIdFromToken(token));
+    }
+
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    [InlineData(DocumentUploadPolicy.MaxSizeBytes + 1)]
+    public async Task Create_rejects_invalid_file_size_before_issuing_upload_uri(long size)
+    {
+        var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, $"docs-size-{size}@test.local");
+
+        var response = await client.PostAsJsonAsync("/api/documents", new
+        {
+            Name = "file.txt",
+            ContentType = "text/plain",
+            Size = size
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, Fixture.FileStorage.UploadUriCallCount);
+        Assert.False(await Fixture.QueryDbAsync(db => db.Documents.IgnoreQueryFilters().AnyAsync()));
+    }
+
+    [Fact]
+    public async Task Create_rejects_unsupported_content_type_before_issuing_upload_uri()
+    {
+        var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-bad-type@test.local");
+
+        var response = await client.PostAsJsonAsync("/api/documents", new
+        {
+            Name = "page.html",
+            ContentType = "text/html",
+            Size = 10L
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, Fixture.FileStorage.UploadUriCallCount);
+        Assert.False(await Fixture.QueryDbAsync(db => db.Documents.IgnoreQueryFilters().AnyAsync()));
+    }
+
+    [Fact]
+    public async Task Create_normalizes_allowed_content_type()
+    {
+        var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-normalized-type@test.local");
+
+        var response = await client.PostAsJsonAsync("/api/documents", new
+        {
+            Name = "picture.png",
+            ContentType = " IMAGE/PNG ",
+            Size = 10L
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var document = await Fixture.QueryDbAsync(db => db.Documents.IgnoreQueryFilters().SingleAsync());
+        Assert.Equal("image/png", document.ContentType);
+        Assert.Equal(10L, document.Size);
+    }
+
+    [Fact]
+    public async Task Download_before_blob_exists_returns_409_without_issuing_download_uri()
+    {
+        var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-pending-upload@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(client, "pending.txt");
+        Fixture.FileStorage.ValidationStatus = UploadValidationStatus.Missing;
+
+        var response = await client.GetAsync($"/api/documents/{documentId}/download");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(1, Fixture.FileStorage.ValidationCallCount);
+        Assert.Equal(0, Fixture.FileStorage.DownloadUriCallCount);
+    }
+
+    [Fact]
+    public async Task Download_with_invalid_blob_returns_422_without_issuing_download_uri()
+    {
+        var client = await TestApiHelpers.AuthenticatedClientAsync(Fixture.Factory, "docs-invalid-upload@test.local");
+        var documentId = await TestApiHelpers.CreateDocumentAsync(client, "invalid.txt");
+        Fixture.FileStorage.ValidationStatus = UploadValidationStatus.Invalid;
+
+        var response = await client.GetAsync($"/api/documents/{documentId}/download");
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(1, Fixture.FileStorage.ValidationCallCount);
+        Assert.Equal(0, Fixture.FileStorage.DownloadUriCallCount);
+        Assert.Equal(1L, Fixture.FileStorage.LastExpectedSize);
+        Assert.Equal("text/plain", Fixture.FileStorage.LastExpectedContentType);
     }
 
     [Fact]

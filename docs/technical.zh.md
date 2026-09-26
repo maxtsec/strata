@@ -254,8 +254,8 @@ Migration 永遠不會走到這段程式碼——schema DDL 與 `migrationBuilde
 | `POST` | `/api/folders` | JWT | `TenantId` 由 server 端從 `ICurrentTenant` 蓋上 |
 | `PUT` | `/api/folders/{id}` | JWT、owner | 改名／搬移，含循環偵測 |
 | `DELETE` | `/api/folders/{id}` | JWT、owner | 非空則 409 |
-| `POST` | `/api/documents` | JWT | 回傳 `documentId` 與一個 15 分鐘的上傳 SAS URI |
-| `GET` | `/api/documents/{id}/download` | JWT、owner 或 share | 回傳 15 分鐘的下載 SAS URI |
+| `POST` | `/api/documents` | JWT | 接受最多 25,000,000 bytes 的 PDF、UTF-8 TXT、PNG、JPEG；回傳 `documentId` 與 15 分鐘、只可建立 Blob 的上傳 SAS URI |
+| `GET` | `/api/documents/{id}/download` | JWT、owner 或 share | 驗證已上傳 Blob 後才回傳 15 分鐘的下載 SAS URI；Blob 不存在回 409，驗證失敗回 422 |
 | `PUT` | `/api/documents/{id}` | JWT、owner 或 `Member` | 改名 |
 | `POST` | `/api/documents/{id}/shares` | JWT、owner | 重複則 409 |
 | `GET` | `/api/documents/{id}/shares` | JWT、owner | |
@@ -275,9 +275,15 @@ Identity 自己的 `SaveChangesAsync`——只在它所有驗證通過之後才�
 
 不存在與無權限的資源同樣回 404（防列舉）。
 
+Client 使用上傳 URI 發送一次 `Put Blob`，設定 `x-ms-blob-type: BlockBlob`
+和申報的 `Content-Type`。Create-only SAS 不能覆寫已建立的 Blob。下載前，
+API 會核對實際大小、MIME type、Blob type，並檢查 PDF／PNG／JPEG 開頭標記，
+或讀完整個 TXT 並驗證 UTF-8，然後才發出 read SAS。驗證失敗的檔案不能經
+下載 endpoint 存取；清理未完成或無效 Blob 是後續的營運工作。
+
 ## 8. 測試
 
-共 107 條測試：12 條架構測試 + 95 條整合測試。
+共 123 條測試：12 條架構測試 + 111 條整合測試。
 
 ### 架構測試（`Strata.Architecture.Tests`）
 
@@ -304,7 +310,7 @@ index、FK 行為與真實 SQL 語義都真正被驗證到。
 |---|---|
 | `IntegrationTestFixture` | 每個 collection 一個已 migrate 的資料庫；每條測試前用 Respawn 重設資料 |
 | `StrataWebApplicationFactory` | 託管真實的 app；把 `IFileStorage` 換成 `FakeFileStorage` |
-| `FakeFileStorage` | 統計上／下載呼叫次數，好讓測試可以斷言**沒有**碰過 Blob Storage |
+| `FakeFileStorage` | 統計上傳、驗證和下載呼叫，並模擬缺少或無效的 Blob；測試不會連到 Azure |
 | `TestApiHelpers` | 註冊／認證、建立 folder／document／share、手工簽發 JWT |
 | `FixedCurrentTenant` / `NoCurrentTenant` | `ICurrentTenant` 的測試替身 |
 

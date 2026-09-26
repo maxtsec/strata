@@ -5,11 +5,12 @@ Status: Accepted
 ## Decision
 
 A `Document`'s actual bytes live in Azure Blob Storage, one blob per
-document, named by the document's `Guid` id. The API never streams file
-content itself. On upload or download, `IFileStorage`
+document, named by the document's `Guid` id. The API does not relay upload
+or download payloads to clients; it does inspect blob bytes before issuing a
+download URI. For accepted uploads and validated downloads, `IFileStorage`
 (`BlobFileStorage`) mints a short-lived (15-minute), user-delegation SAS URI
 scoped to exactly that one blob and to exactly the permission needed
-(Create/Write for upload, Read for download), and hands the URI back to the
+(Create for upload, Read for download), and hands the URI back to the
 client, which then talks to Blob Storage directly. The app authenticates to
 Blob Storage itself with `DefaultAzureCredential` — the App Service's
 managed identity when deployed, the developer's own `az login` locally — so
@@ -20,10 +21,11 @@ configuration.
 
 **Proxying bytes through the API** (client uploads/downloads hit an
 ASP.NET Core endpoint, which streams to/from Blob Storage server-side) was
-rejected: every byte would cross the App Service twice, doubling bandwidth
-and compute cost for what is fundamentally a storage operation, and turning
-the API into a throughput bottleneck for it. This does give up something
-real, not nothing — a proxy re-runs authorization on every request, so a
+rejected: every client transfer would pass through App Service, increasing
+bandwidth and compute cost and turning the API into a throughput bottleneck.
+Validation still reads up to 25 MB for UTF-8 TXT, or a short signature for
+other accepted formats, but clients transfer the file directly. This gives
+up something real — a proxy re-runs authorization on every request, so a
 revoked `DocumentShare` stops access immediately, while a SAS URI already
 issued keeps working until it naturally expires (see Cost). The proxy
 approach was rejected anyway: the residual-access window a SAS leaves open
@@ -73,14 +75,16 @@ longer than that window fails and needs a freshly minted URI. Fine for
 typical document sizes, but a very large file or a slow client connection
 would need a wider window or a resumable-upload flow.
 
-Because the API hands out a URI instead of proxying, it has no visibility
-into whether an upload actually completed, its final size, or whether the
-content type the client used matches what was declared when the URI was
-requested — `Document.Size` and `Document.ContentType` are trusted at
-creation time, not verified against the blob that eventually lands. A
-production system would want a completion callback (Blob Storage's own
-event grid notifications) or a periodic reconciliation job to catch
-missing or mismatched uploads.
+The API accepts PDF, UTF-8 TXT, PNG, and JPEG up to 25,000,000 bytes. The
+client uploads one block blob with `Put Blob` and the declared `Content-Type`.
+Create-only SAS permission can create that blob but cannot overwrite it after
+the first upload. Before issuing a read SAS, the API checks the blob's actual
+length, content type, block-blob type, and file signature (or full UTF-8 text
+content) against the recorded document. It returns 409 for a missing upload
+and 422 for a mismatch. The read SAS forces a download attachment response.
+The signature check is a format check, not a full parser or malware scanner.
+An invalid or abandoned upload can still consume storage until a cleanup
+process is added; the API does not yet reconcile unused blobs periodically.
 
 Minting a user-delegation key requires the app's identity to hold an RBAC
 role on the storage account capable of requesting one (Storage Blob Data

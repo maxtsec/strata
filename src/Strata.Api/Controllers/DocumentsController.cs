@@ -49,6 +49,21 @@ public class DocumentsController : ControllerBase
             return Unauthorized();
         }
 
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 255)
+        {
+            return BadRequest("Document name must be 1 to 255 characters.");
+        }
+
+        if (!DocumentUploadPolicy.IsValidSize(request.Size))
+        {
+            return BadRequest("Document size must be between 1 and 25,000,000 bytes.");
+        }
+
+        if (!DocumentUploadPolicy.TryNormalizeContentType(request.ContentType, out var contentType))
+        {
+            return BadRequest("Supported content types: application/pdf, text/plain, image/png, image/jpeg.");
+        }
+
         if (request.FolderId is { } folderId && !await IsFolderOwnedByCurrentUser(folderId, cancellationToken))
         {
             return BadRequest("Folder not found.");
@@ -61,14 +76,13 @@ public class DocumentsController : ControllerBase
             OwnerId = userId,
             TenantId = _currentTenant.TenantId,
             FolderId = request.FolderId,
-            ContentType = request.ContentType,
+            ContentType = contentType,
             Size = request.Size
         };
 
+        var uploadUri = await _fileStorage.GetUploadUriAsync(document.Id, cancellationToken);
         _dbContext.Documents.Add(document);
         await _dbContext.SaveChangesAsync(cancellationToken);
-
-        var uploadUri = await _fileStorage.GetUploadUriAsync(document.Id, request.ContentType, cancellationToken);
 
         return Ok(new { DocumentId = document.Id, UploadUrl = uploadUri });
     }
@@ -91,8 +105,15 @@ public class DocumentsController : ControllerBase
             return NotFound();
         }
 
-        var downloadUri = await _fileStorage.GetDownloadUriAsync(id, cancellationToken);
-        return Ok(new { DownloadUrl = downloadUri });
+        var download = await _fileStorage.GetValidatedDownloadUriAsync(
+            id, document.Size, document.ContentType, cancellationToken);
+        return download.Status switch
+        {
+            UploadValidationStatus.Missing => Conflict("Upload has not completed."),
+            UploadValidationStatus.Invalid => UnprocessableEntity("Uploaded file does not match its declared size or type."),
+            UploadValidationStatus.Valid when download.Uri is { } uri => Ok(new { DownloadUrl = uri }),
+            _ => throw new InvalidOperationException("File storage returned a valid result without a download URI.")
+        };
     }
 
     [HttpPut("{id}")]
